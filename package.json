@@ -1,0 +1,25 @@
+{
+  "name": "steam-value",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "add": "op run -- bun scripts/add-game.ts",
+    "list": "op run -- bun scripts/list.ts",
+    "recalc": "op run -- bun scripts/recalculate.ts",
+    "db:generate": "op run -- bunx drizzle-kit generate",
+    "db:push": "op run -- bunx drizzle-kit push",
+    "db:studio": "op run -- bunx drizzle-kit studio"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "^0.31.8"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.0",
+    "drizzle-orm": "^0.45.1"
+  }
+}
