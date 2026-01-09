@@ -21,7 +21,7 @@ export const formulaConfig = {
    * - 0.5 = Square root penalty (balanced)
    * - 1.0 = Linear penalty (strong time preference)
    */
-  hoursPenaltyExponent: 0.5,
+  hoursPenaltyExponent: 0.4,
 
   /**
    * Minimum hours used in calculation.
