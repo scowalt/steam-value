@@ -3,6 +3,7 @@ import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { fetchSteamData } from "../src/scrapers/steam";
 import { fetchHltbData } from "../src/scrapers/hltb";
+import { lookupHltbForSteam } from "../src/scrapers/hltb-lookup";
 import { calculateValueScore } from "../src/formula";
 import { eq } from "drizzle-orm";
 
@@ -71,7 +72,26 @@ async function main() {
 
   // Fetch HLTB data
   console.log(`\nFetching HLTB data for "${steamData.name}"...`);
-  const hltbData = await fetchHltbData(steamData.name, hltbId ?? undefined);
+
+  let hltbData = null;
+
+  // If HLTB ID provided, use it directly
+  if (hltbId) {
+    hltbData = await fetchHltbData(steamData.name, hltbId);
+  } else {
+    // Try auto-lookup first (checks manual overrides)
+    const lookup = await lookupHltbForSteam(steamAppId, steamData.name);
+    if (lookup) {
+      console.log(`  Auto-matched via ${lookup.source} (confidence: ${lookup.confidence})`);
+      hltbData = {
+        hltbId: lookup.hltbId,
+        name: lookup.name,
+        main: lookup.main,
+        mainExtra: lookup.mainExtra,
+        completionist: lookup.completionist,
+      };
+    }
+  }
 
   if (hltbData) {
     console.log(`  Found: ${hltbData.name}`);
@@ -80,6 +100,7 @@ async function main() {
     console.log(`  Completionist: ${hltbData.completionist?.toFixed(1) ?? "N/A"} hours`);
   } else {
     console.log("  No HLTB data found");
+    console.log("  Tip: Use --hltb-id <id> to specify the HLTB game ID");
   }
 
   // Calculate value score
