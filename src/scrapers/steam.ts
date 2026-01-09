@@ -15,6 +15,7 @@ interface SteamAppDetailsResponse {
   [appId: string]: {
     success: boolean;
     data?: {
+      type: string;
       name: string;
       steam_appid: number;
     };
@@ -66,4 +67,21 @@ export async function fetchSteamData(appId: number): Promise<SteamData> {
     reviewScore,
     reviewCount: total_reviews,
   };
+}
+
+/**
+ * Check if a Steam app is actually a game (not video, dlc, software, etc.)
+ */
+export async function isGame(appId: number): Promise<boolean> {
+  const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
+  const res = await fetch(url);
+
+  if (!res.ok) return false;
+
+  const data = (await res.json()) as SteamAppDetailsResponse;
+  const appData = data[appId.toString()];
+
+  if (!appData?.success || !appData.data) return false;
+
+  return appData.data.type === "game";
 }
