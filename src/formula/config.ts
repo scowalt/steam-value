@@ -14,6 +14,16 @@ export const formulaConfig = {
   timeMetric: "main" as "main" | "mainExtra" | "completionist",
 
   /**
+   * Exponent applied to review score.
+   * Higher values make high ratings more impactful.
+   *
+   * - 1.0 = Linear (95% is 1.19x better than 80%)
+   * - 1.5 = Moderate curve (95% is 1.29x better than 80%)
+   * - 2.0 = Strong curve (95% is 1.41x better than 80%)
+   */
+  reviewScoreExponent: 3.0,
+
+  /**
    * How much to penalize longer games.
    * Formula: score / (hours ^ exponent)
    *

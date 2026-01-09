@@ -22,7 +22,7 @@ export interface ValueScoreInput {
  */
 export function calculateValueScore(input: ValueScoreInput): number | null {
   const { steamReviewScore, steamReviewCount, hltbMain, hltbMainExtra, hltbCompletionist, isEndless } = input;
-  const { timeMetric, hoursPenaltyExponent, minHours, reviewCountWeight, minReviewCount } = formulaConfig;
+  const { timeMetric, reviewScoreExponent, hoursPenaltyExponent, minHours, reviewCountWeight, minReviewCount } = formulaConfig;
 
   // Endless games (MMO/survival/multiplayer) don't get value scores
   if (isEndless) {
@@ -56,8 +56,9 @@ export function calculateValueScore(input: ValueScoreInput): number | null {
   // Apply minimum hours floor
   const effectiveHours = Math.max(hours, minHours);
 
-  // Base formula: quality / time^exponent
-  let score = steamReviewScore / Math.pow(effectiveHours, hoursPenaltyExponent);
+  // Base formula: quality^exponent / time^exponent
+  const adjustedScore = Math.pow(steamReviewScore, reviewScoreExponent);
+  let score = adjustedScore / Math.pow(effectiveHours, hoursPenaltyExponent);
 
   // Apply review count bonus (more reviews = more confidence)
   if (reviewCountWeight > 0 && steamReviewCount && steamReviewCount > 0) {
