@@ -20,6 +20,8 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.0",
-    "drizzle-orm": "^0.45.1"
+    "drizzle-orm": "^0.45.1",
+    "howlongtobeat": "^1.8.0",
+    "playwright": "^1.57.0"
   }
 }

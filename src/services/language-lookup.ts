@@ -1,6 +1,8 @@
 // Language Lookup Service
 // Provides language support checks for Steam games
-// Sources: 1) steamdb-raw.json (local), 2) Steam API (fallback)
+// Sources: 1) steamdb-raw.json (local), 2) Steam API via rate-limited client (fallback)
+
+import { steam } from "../lib/steam-client";
 
 interface SteamDbEntry {
   sid: number;
@@ -8,21 +10,9 @@ interface SteamDbEntry {
   languages?: string;
 }
 
-interface SteamAppDetailsResponse {
-  [appId: string]: {
-    success: boolean;
-    data?: {
-      supported_languages?: string;
-    };
-  };
-}
-
 // In-memory index: Steam App ID -> languages array
 let languageIndex: Map<number, string[]> | null = null;
 let loadPromise: Promise<void> | null = null;
-
-// Cache for Steam API lookups
-const steamApiCache = new Map<number, string[] | null>();
 
 const STEAMDB_PATH = new URL("../data/steamdb-raw.json", import.meta.url).pathname;
 
@@ -70,59 +60,11 @@ async function ensureLoaded(): Promise<void> {
 }
 
 /**
- * Parse Steam's HTML-encoded supported_languages string
- * Example: "English<strong>*</strong>, French<strong>*</strong>, German"
- * Returns: ["English", "French", "German"]
- */
-function parseSteamLanguages(html: string): string[] {
-  // Order matters: replace <br> BEFORE removing other HTML tags
-  const cleaned = html
-    .replace(/<br\s*\/?>/gi, ",") // Replace <br> with comma first
-    .replace(/<[^>]*>/g, "") // Then remove other HTML tags
-    .replace(/\*/g, ""); // Remove asterisks
-
-  // Split by comma and clean up
-  return cleaned
-    .split(",")
-    .map((lang) => lang.trim())
-    .filter((lang) => lang.length > 0 && !lang.includes("languages with"));
-}
-
-/**
- * Fetch languages from Steam API
+ * Fetch languages from Steam API (via rate-limited client)
  */
 async function fetchLanguagesFromSteam(steamAppId: number): Promise<string[] | null> {
-  // Check cache first
-  if (steamApiCache.has(steamAppId)) {
-    return steamApiCache.get(steamAppId) ?? null;
-  }
-
-  try {
-    const url = `https://store.steampowered.com/api/appdetails?appids=${steamAppId}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      console.warn(`[Language Lookup] Steam API returned ${response.status} for ${steamAppId}`);
-      steamApiCache.set(steamAppId, null);
-      return null;
-    }
-
-    const data = (await response.json()) as SteamAppDetailsResponse;
-    const appData = data[steamAppId.toString()];
-
-    if (!appData?.success || !appData.data?.supported_languages) {
-      steamApiCache.set(steamAppId, null);
-      return null;
-    }
-
-    const languages = parseSteamLanguages(appData.data.supported_languages);
-    steamApiCache.set(steamAppId, languages);
-    return languages;
-  } catch (error) {
-    console.warn(`[Language Lookup] Failed to fetch from Steam API for ${steamAppId}:`, error);
-    steamApiCache.set(steamAppId, null);
-    return null;
-  }
+  // Uses the centralized steam client which has built-in rate limiting and caching
+  return steam.getLanguages(steamAppId);
 }
 
 /**

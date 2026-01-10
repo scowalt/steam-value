@@ -31,7 +31,7 @@ export const formulaConfig = {
    * - 0.5 = Square root penalty (balanced)
    * - 1.0 = Linear penalty (strong time preference)
    */
-  hoursPenaltyExponent: 0.4,
+  hoursPenaltyExponent: 0.05,
 
   /**
    * Minimum hours used in calculation.
@@ -47,7 +47,7 @@ export const formulaConfig = {
    * - 0.05 = Slight bonus for popular games
    * - 0.1 = Moderate bonus
    */
-  reviewCountWeight: 0.05,
+  reviewCountWeight: 0.1,
 
   /**
    * Minimum review count to include a game.

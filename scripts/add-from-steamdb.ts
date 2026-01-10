@@ -7,6 +7,8 @@ import { games } from "../src/db/schema";
 import { fetchSteamData, isGame } from "../src/scrapers/steam";
 import { verifyHltbMapping } from "../src/services/hltb-mapping";
 import { hasEnglishSupport } from "../src/services/language-lookup";
+import { isIgnored } from "../src/services/steam-ignored";
+import { hasPlayed } from "../src/services/steam-played";
 import { calculateValueScore } from "../src/formula";
 import { eq, inArray } from "drizzle-orm";
 
@@ -50,6 +52,20 @@ async function main() {
       const isActualGame = await isGame(candidate.sid);
       if (!isActualGame) {
         console.log("⊘ Not a game");
+        skipped++;
+        continue;
+      }
+
+      // Check if user has ignored this game on Steam
+      if (await isIgnored(candidate.sid)) {
+        console.log("⊘ Ignored");
+        skipped++;
+        continue;
+      }
+
+      // Check if user has already played this game
+      if (await hasPlayed(candidate.sid)) {
+        console.log("⊘ Played");
         skipped++;
         continue;
       }
@@ -107,8 +123,7 @@ async function main() {
       failed++;
     }
 
-    // Rate limit
-    await new Promise(r => setTimeout(r, 1100));
+    // Rate limiting is now handled by the steam client
   }
 
   console.log(`\n=== Summary ===`);

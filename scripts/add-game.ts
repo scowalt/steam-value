@@ -4,6 +4,8 @@ import { games } from "../src/db/schema";
 import { fetchSteamData, isGame } from "../src/scrapers/steam";
 import { verifyHltbMapping, verifyManualHltbId } from "../src/services/hltb-mapping";
 import { hasEnglishSupport, getLanguages } from "../src/services/language-lookup";
+import { isIgnored } from "../src/services/steam-ignored";
+import { hasPlayed } from "../src/services/steam-played";
 import { calculateValueScore } from "../src/formula";
 import { eq } from "drizzle-orm";
 
@@ -14,6 +16,7 @@ function parseArgs() {
   let isEndless = false;
   let forceUnverified = false;
   let skipEnglishCheck = false;
+  let force = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -26,16 +29,18 @@ function parseArgs() {
       forceUnverified = true;
     } else if (arg === "--skip-english-check") {
       skipEnglishCheck = true;
+    } else if (arg === "--force") {
+      force = true;
     } else if (!arg.startsWith("--") && steamAppId === null) {
       steamAppId = parseInt(arg, 10);
     }
   }
 
-  return { steamAppId, hltbId, isEndless, forceUnverified, skipEnglishCheck };
+  return { steamAppId, hltbId, isEndless, forceUnverified, skipEnglishCheck, force };
 }
 
 async function main() {
-  const { steamAppId, hltbId, isEndless, forceUnverified, skipEnglishCheck } = parseArgs();
+  const { steamAppId, hltbId, isEndless, forceUnverified, skipEnglishCheck, force } = parseArgs();
 
   if (!steamAppId || isNaN(steamAppId)) {
     console.error("Usage: bun scripts/add-game.ts <steam_app_id> [options]");
@@ -45,6 +50,7 @@ async function main() {
     console.error("  --endless            Mark as endless/multiplayer game (no value score)");
     console.error("  --force-unverified   Use HLTB data even if unverified (not recommended)");
     console.error("  --skip-english-check Allow adding games without English support");
+    console.error("  --force              Add even if game is on your Steam ignored list");
     console.error("\nTo find the HLTB ID:");
     console.error("  1. Search for the game on howlongtobeat.com");
     console.error("  2. Look at the URL: howlongtobeat.com/game/XXXXX");
@@ -62,6 +68,20 @@ async function main() {
   if (existing) {
     console.log(`Game "${existing.name}" already exists (id: ${existing.id})`);
     console.log("Use the update script to refresh data.");
+    process.exit(0);
+  }
+
+  // Check if game is on user's Steam ignored list
+  if (!force && (await isIgnored(steamAppId))) {
+    console.log("\nThis game is on your Steam 'Not Interested' list.");
+    console.log("Use --force to add anyway.");
+    process.exit(0);
+  }
+
+  // Check if user has already played this game
+  if (!force && (await hasPlayed(steamAppId))) {
+    console.log("\nYou've already played this game.");
+    console.log("Use --force to add anyway.");
     process.exit(0);
   }
 

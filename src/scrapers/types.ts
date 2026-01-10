@@ -11,6 +11,7 @@ export interface HltbData {
   main: number | null; // hours
   mainExtra: number | null; // hours
   completionist: number | null; // hours
+  profileSteam: number | null; // Steam App ID from HLTB (for verification)
 }
 
 export interface GameData {

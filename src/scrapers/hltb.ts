@@ -18,7 +18,7 @@ interface HltbGameData {
   comp_main: number;
   comp_plus: number;
   comp_100: number;
-  profile_steam?: number;
+  profile_steam: number; // Steam App ID (0 if not linked)
 }
 
 interface NextData {
@@ -76,6 +76,7 @@ export async function getHltbById(hltbId: number): Promise<HltbData | null> {
       main: gameData.comp_main > 0 ? gameData.comp_main / 3600 : null,
       mainExtra: gameData.comp_plus > 0 ? gameData.comp_plus / 3600 : null,
       completionist: gameData.comp_100 > 0 ? gameData.comp_100 / 3600 : null,
+      profileSteam: gameData.profile_steam > 0 ? gameData.profile_steam : null,
     };
   } catch (error) {
     console.error(`Failed to fetch HLTB data for id ${hltbId}:`, error);
