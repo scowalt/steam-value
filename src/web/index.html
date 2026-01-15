@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Steam Value Rankings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #1b2838;
+      color: #c7d5e0;
+      padding: 2rem;
+    }
+    h1 {
+      color: #66c0f4;
+      margin-bottom: 1.5rem;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+    .header h1 { margin-bottom: 0; }
+    #sync-btn {
+      padding: 0.5rem 1rem;
+      background: #1b2838;
+      border: 1px solid #66c0f4;
+      color: #66c0f4;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    #sync-btn:hover { background: #66c0f4; color: #1b2838; }
+    #sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    #sync-status { color: #8f98a0; font-size: 0.85rem; margin-right: 1rem; }
+    .header-controls { display: flex; align-items: center; gap: 2rem; }
+    .filters { display: flex; align-items: center; gap: 1.5rem; }
+    .filters label { display: flex; align-items: center; gap: 0.5rem; color: #c7d5e0; font-size: 0.9rem; }
+    .filters input[type="checkbox"] { accent-color: #66c0f4; }
+    .filters select {
+      background: #1b2838;
+      border: 1px solid #66c0f4;
+      color: #c7d5e0;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+    .sync-controls { display: flex; align-items: center; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #16202d;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+    }
+    th {
+      background: #1b2838;
+      color: #66c0f4;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+    }
+    tr:hover { background: #1e3a52; }
+    td.rank { color: #8f98a0; width: 60px; }
+    td.score { color: #a1cd44; font-weight: 600; }
+    td.reviews { color: #66c0f4; }
+    td.hours { color: #8f98a0; }
+    td.wishlist { text-align: center; width: 40px; }
+    td.owned { text-align: center; width: 40px; }
+    td.playtime { color: #8f98a0; width: 70px; }
+    td.ea { text-align: center; width: 40px; color: #5c7e10; }
+    td.controller { text-align: center; width: 70px; font-size: 0.85em; }
+    td.mode { text-align: center; width: 60px; font-size: 0.85em; color: #8f98a0; }
+    .mode-sp { color: #a1cd44; }
+    .mode-mp { color: #66c0f4; }
+    .controller-full { color: #a1cd44; }
+    .controller-partial { color: #c7923e; }
+    .wishlist-check { color: #a1cd44; font-size: 1.2em; }
+    .owned-check { color: #66c0f4; font-size: 1.2em; }
+    .ea-check { color: #5c7e10; font-size: 1.2em; }
+    a {
+      color: #c7d5e0;
+      text-decoration: none;
+    }
+    a:hover { color: #66c0f4; }
+    .review-pct { color: #a1cd44; }
+    .review-count { color: #8f98a0; font-size: 0.9em; }
+    #loading {
+      text-align: center;
+      padding: 2rem;
+      color: #8f98a0;
+    }
+    #load-more {
+      display: block;
+      margin: 1.5rem auto;
+      padding: 0.75rem 2rem;
+      background: #1b2838;
+      border: 1px solid #66c0f4;
+      color: #66c0f4;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    #load-more:hover {
+      background: #66c0f4;
+      color: #1b2838;
+    }
+    #load-more:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Steam Value Rankings</h1>
+    <div class="header-controls">
+      <div class="filters">
+        <label>
+          <input type="checkbox" id="hide-ea"> Hide Early Access
+        </label>
+        <label>
+          <input type="checkbox" id="hide-played"> Hide Played
+        </label>
+        <label>
+          <input type="checkbox" id="hide-mmo"> Hide MMO
+        </label>
+        <label>
+          <input type="checkbox" id="hide-ignored" checked> Hide Ignored
+        </label>
+        <label>
+          <input type="checkbox" id="single-only"> Single-player only
+        </label>
+        <label>
+          Co-op:
+          <select id="coop-filter">
+            <option value="any">Any</option>
+            <option value="has-coop">Has Co-op</option>
+            <option value="online-coop">Online Co-op</option>
+            <option value="local-coop">Local Co-op</option>
+          </select>
+        </label>
+        <label>
+          Controller:
+          <select id="controller-filter">
+            <option value="any">Any</option>
+            <option value="full">Full only</option>
+            <option value="partial">Partial+</option>
+          </select>
+        </label>
+      </div>
+      <div class="sync-controls">
+        <span id="sync-status"></span>
+        <button id="sync-btn">Sync with Steam</button>
+      </div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th title="Wishlist">WL</th>
+        <th title="Owned">Own</th>
+        <th>#</th>
+        <th>Game</th>
+        <th>Score</th>
+        <th>Reviews</th>
+        <th title="How Long to Beat">HLTB</th>
+        <th title="Your Playtime">Played</th>
+        <th title="Single/Multiplayer">Mode</th>
+        <th>EA</th>
+        <th>Controller</th>
+      </tr>
+    </thead>
+    <tbody id="games-list">
+    </tbody>
+  </table>
+  <div id="loading">Loading...</div>
+  <button id="load-more" style="display: none;">Load More</button>
+  <script type="module" src="./app.ts"></script>
+</body>
+</html>

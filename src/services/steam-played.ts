@@ -21,6 +21,7 @@ interface GetOwnedGamesResponse {
 
 // In-memory cache for the session
 let playedAppsCache: Set<number> | null = null;
+let ownedGamesCache: Map<number, number> | null = null; // appId -> playtimeMinutes
 
 /**
  * Fetch games the user has played (any playtime > 0) from Steam Web API.
@@ -69,6 +70,63 @@ export async function fetchPlayedApps(): Promise<Set<number>> {
 }
 
 /**
+ * Fetch all owned games with their playtime from Steam Web API.
+ * Returns a Map of appId -> playtimeMinutes (includes games with 0 playtime).
+ */
+export async function fetchOwnedGamesWithPlaytime(): Promise<Map<number, number>> {
+  const apiKey = process.env.STEAM_API_KEY;
+  const steamId = process.env.STEAM_ID;
+
+  if (!apiKey || !steamId) {
+    console.warn("[Steam Played] Missing STEAM_API_KEY or STEAM_ID in .env");
+    return new Map();
+  }
+
+  console.log("[Steam Played] Fetching owned games from Steam API...");
+
+  const url = new URL("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/");
+  url.searchParams.set("key", apiKey);
+  url.searchParams.set("steamid", steamId);
+  url.searchParams.set("include_appinfo", "true");
+  url.searchParams.set("include_played_free_games", "true");
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Steam API error: ${response.status}`);
+  }
+
+  const data: GetOwnedGamesResponse = await response.json();
+
+  if (!data.response?.games) {
+    console.warn("[Steam Played] No games found. Is your profile public?");
+    ownedGamesCache = new Map();
+    return ownedGamesCache;
+  }
+
+  // Create map of all owned games (including 0 playtime)
+  ownedGamesCache = new Map(
+    data.response.games.map((g) => [g.appid, g.playtime_forever])
+  );
+
+  console.log(
+    `[Steam Played] Found ${data.response.game_count} owned games`
+  );
+
+  return ownedGamesCache;
+}
+
+/**
+ * Get cached owned games map, or fetch if not loaded.
+ */
+export async function getOwnedGamesWithPlaytime(): Promise<Map<number, number>> {
+  if (!ownedGamesCache) {
+    await fetchOwnedGamesWithPlaytime();
+  }
+  return ownedGamesCache ?? new Map();
+}
+
+/**
  * Check if the user has played a game (has any playtime).
  */
 export async function hasPlayed(appId: number): Promise<boolean> {
@@ -90,4 +148,5 @@ export function getPlayedApps(): Set<number> | null {
  */
 export function clearPlayedCache(): void {
   playedAppsCache = null;
+  ownedGamesCache = null;
 }

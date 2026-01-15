@@ -4,11 +4,10 @@
 
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
-import { fetchSteamData, isGame } from "../src/scrapers/steam";
+import { fetchSteamData, isGame, getGameModes, getControllerSupport } from "../src/scrapers/steam";
 import { verifyHltbMapping } from "../src/services/hltb-mapping";
 import { hasEnglishSupport } from "../src/services/language-lookup";
 import { isIgnored } from "../src/services/steam-ignored";
-import { hasPlayed } from "../src/services/steam-played";
 import { calculateValueScore } from "../src/formula";
 import { eq, inArray } from "drizzle-orm";
 
@@ -31,10 +30,11 @@ async function main() {
   const existingIds = new Set(existing.map(g => g.steamAppId));
 
   // Filter to games with HLTB URLs that aren't in DB, sorted by review score
+  // Use 20x multiplier to account for extensive ignore lists
   const candidates = steamdbData
     .filter(g => g.hltb_url && !existingIds.has(g.sid))
     .sort((a, b) => (b.store_uscore ?? 0) - (a.store_uscore ?? 0))
-    .slice(0, limit * 2); // Get extra in case some fail
+    .slice(0, limit * 20); // Get extra for large ignore lists
 
   console.log(`Found ${candidates.length} candidates, processing up to ${limit}...\n`);
 
@@ -56,19 +56,8 @@ async function main() {
         continue;
       }
 
-      // Check if user has ignored this game on Steam
-      if (await isIgnored(candidate.sid)) {
-        console.log("⊘ Ignored");
-        skipped++;
-        continue;
-      }
-
-      // Check if user has already played this game
-      if (await hasPlayed(candidate.sid)) {
-        console.log("⊘ Played");
-        skipped++;
-        continue;
-      }
+      // Check if user has ignored this game on Steam (but still add it)
+      const gameIsIgnored = await isIgnored(candidate.sid);
 
       // Check English support
       const hasEnglish = await hasEnglishSupport(candidate.sid);
@@ -90,6 +79,10 @@ async function main() {
         continue;
       }
 
+      // Fetch game modes and controller support
+      const gameModes = await getGameModes(candidate.sid);
+      const controllerSupport = await getControllerSupport(candidate.sid);
+
       // Calculate value score
       const valueScore = calculateValueScore({
         steamReviewScore: steamData.reviewScore,
@@ -97,7 +90,7 @@ async function main() {
         hltbMain: verification.hltbData.main,
         hltbMainExtra: verification.hltbData.mainExtra,
         hltbCompletionist: verification.hltbData.completionist,
-        isEndless: false,
+        isEndless: gameModes.isMMO,
       });
 
       // Insert
@@ -111,11 +104,24 @@ async function main() {
         hltbMainExtra: verification.hltbData.mainExtra,
         hltbCompletionist: verification.hltbData.completionist,
         valueScore,
-        isEndless: false,
+        isEndless: gameModes.isMMO,
+        isIgnored: gameIsIgnored,
+        controllerSupport,
+        hasSinglePlayer: gameModes.hasSinglePlayer,
+        hasMultiplayer: gameModes.hasMultiplayer,
+        hasCoOp: gameModes.hasCoOp,
+        hasOnlineCoOp: gameModes.hasOnlineCoOp,
+        hasLocalCoOp: gameModes.hasLocalCoOp,
+        hasPvP: gameModes.hasPvP,
+        hasOnlinePvP: gameModes.hasOnlinePvP,
+        hasLocalPvP: gameModes.hasLocalPvP,
+        hasCrossplatform: gameModes.hasCrossplatform,
+        isMMO: gameModes.isMMO,
       });
 
       const hours = verification.hltbData.main?.toFixed(0) ?? "?";
-      console.log(`✓ ${steamData.reviewScore}% | ${hours}h | ${valueScore?.toFixed(0) ?? "N/A"}`);
+      const ignoredTag = gameIsIgnored ? " [Ignored]" : "";
+      console.log(`✓ ${steamData.reviewScore}% | ${hours}h | ${valueScore?.toFixed(0) ?? "N/A"}${ignoredTag}`);
       added++;
 
     } catch (e: any) {

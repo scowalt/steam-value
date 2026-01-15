@@ -7,6 +7,7 @@
     "add": "op run -- bun scripts/add-game.ts",
     "list": "op run -- bun scripts/list.ts",
     "recalc": "op run -- bun scripts/recalculate.ts",
+    "web": "op run -- bun src/web/server.ts",
     "db:generate": "op run -- bunx drizzle-kit generate",
     "db:push": "op run -- bunx drizzle-kit push",
     "db:studio": "op run -- bunx drizzle-kit studio"

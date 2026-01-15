@@ -31,6 +31,35 @@ export interface SteamClientStats {
   retries: number;
 }
 
+export interface GameModes {
+  hasSinglePlayer: boolean;
+  hasMultiplayer: boolean;
+  hasCoOp: boolean;
+  hasOnlineCoOp: boolean;
+  hasLocalCoOp: boolean;
+  hasPvP: boolean;
+  hasOnlinePvP: boolean;
+  hasLocalPvP: boolean;
+  hasCrossplatform: boolean;
+  isMMO: boolean;
+}
+
+// Steam Category IDs for game modes
+const CATEGORY_IDS = {
+  SINGLE_PLAYER: 2,
+  MULTIPLAYER: 1,
+  CO_OP: 9,
+  ONLINE_CO_OP: 38,
+  LOCAL_CO_OP: 37,
+  ONLINE_MULTIPLAYER: 36,
+  PVP: 49,
+  LOCAL_PVP: 39, // Shared/Split Screen PvP
+  CROSS_PLATFORM: 27,
+  MMO: 20,
+  FULL_CONTROLLER: 28,
+  PARTIAL_CONTROLLER: 18,
+} as const;
+
 // Steam API response types
 interface SteamReviewsResponse {
   success: number;
@@ -51,6 +80,9 @@ interface SteamAppDetailsResponse {
       name: string;
       steam_appid: number;
       supported_languages?: string;
+      genres?: Array<{ id: string; description: string }>;
+      categories?: Array<{ id: number; description: string }>;
+      release_date?: { coming_soon: boolean; date: string };
     };
   };
 }
@@ -341,6 +373,231 @@ export class SteamClient {
   }
 
   /**
+   * Check if a game is in Early Access
+   */
+  async isEarlyAccess(appId: number): Promise<boolean> {
+    const cacheKey = `earlyAccess:${appId}`;
+    const cached = this.cache.get(cacheKey) as boolean | undefined;
+    if (cached !== undefined) {
+      this.stats.cacheHits++;
+      return cached;
+    }
+
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
+
+    try {
+      const data = await this.fetchWithRetry<SteamAppDetailsResponse>(url);
+      const appData = data[appId.toString()];
+
+      if (!appData?.success || !appData.data?.genres) {
+        this.cache.set(cacheKey, false, this.config.cacheTtlMs);
+        return false;
+      }
+
+      // Early Access has genre ID "70"
+      const result = appData.data.genres.some((g) => g.id === "70");
+      this.cache.set(cacheKey, result, this.config.cacheTtlMs);
+      return result;
+    } catch {
+      this.cache.set(cacheKey, false, this.config.cacheTtlMs);
+      return false;
+    }
+  }
+
+  /**
+   * Get controller support level for a game
+   * Returns "full", "partial", or null (no support)
+   */
+  async getControllerSupport(appId: number): Promise<"full" | "partial" | null> {
+    const cacheKey = `controller:${appId}`;
+    const cached = this.cache.get(cacheKey) as "full" | "partial" | null | undefined;
+    if (cached !== undefined) {
+      this.stats.cacheHits++;
+      return cached;
+    }
+
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
+
+    try {
+      const data = await this.fetchWithRetry<SteamAppDetailsResponse>(url);
+      const appData = data[appId.toString()];
+
+      if (!appData?.success || !appData.data?.categories) {
+        this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+        return null;
+      }
+
+      // Category 28 = Full controller support, 18 = Partial
+      const categories = appData.data.categories;
+      let result: "full" | "partial" | null = null;
+
+      if (categories.some((c) => c.id === 28)) {
+        result = "full";
+      } else if (categories.some((c) => c.id === 18)) {
+        result = "partial";
+      }
+
+      this.cache.set(cacheKey, result, this.config.cacheTtlMs);
+      return result;
+    } catch {
+      this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+      return null;
+    }
+  }
+
+  /**
+   * Get release date for a game
+   * Returns ISO date string "YYYY-MM-DD" or null
+   */
+  async getReleaseDate(appId: number): Promise<string | null> {
+    const cacheKey = `releaseDate:${appId}`;
+    const cached = this.cache.get(cacheKey) as string | null | undefined;
+    if (cached !== undefined) {
+      this.stats.cacheHits++;
+      return cached;
+    }
+
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
+
+    try {
+      const data = await this.fetchWithRetry<SteamAppDetailsResponse>(url);
+      const appData = data[appId.toString()];
+
+      if (!appData?.success || !appData.data?.release_date) {
+        this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+        return null;
+      }
+
+      const { coming_soon, date } = appData.data.release_date;
+      if (coming_soon || !date) {
+        this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+        return null;
+      }
+
+      // Parse Steam's date format (e.g., "Nov 16, 2004" or "16 Nov, 2004")
+      const parsed = this.parseSteamDate(date);
+      this.cache.set(cacheKey, parsed, this.config.cacheTtlMs);
+      return parsed;
+    } catch {
+      this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+      return null;
+    }
+  }
+
+  /**
+   * Parse Steam's date format into ISO date string
+   */
+  private parseSteamDate(dateStr: string): string | null {
+    try {
+      // Try parsing with Date constructor (handles "Nov 16, 2004" etc.)
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return null;
+      return date.toISOString().split("T")[0];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get game modes (single-player, multiplayer, co-op, etc.)
+   */
+  async getGameModes(appId: number): Promise<GameModes> {
+    const cacheKey = `gameModes:${appId}`;
+    const cached = this.cache.get(cacheKey) as GameModes | undefined;
+    if (cached !== undefined) {
+      this.stats.cacheHits++;
+      return cached;
+    }
+
+    const defaultModes: GameModes = {
+      hasSinglePlayer: false,
+      hasMultiplayer: false,
+      hasCoOp: false,
+      hasOnlineCoOp: false,
+      hasLocalCoOp: false,
+      hasPvP: false,
+      hasOnlinePvP: false,
+      hasLocalPvP: false,
+      hasCrossplatform: false,
+      isMMO: false,
+    };
+
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
+
+    try {
+      const data = await this.fetchWithRetry<SteamAppDetailsResponse>(url);
+      const appData = data[appId.toString()];
+
+      if (!appData?.success || !appData.data?.categories) {
+        this.cache.set(cacheKey, defaultModes, this.config.cacheTtlMs);
+        return defaultModes;
+      }
+
+      const categories = appData.data.categories;
+      const hasCategory = (id: number) => categories.some((c) => c.id === id);
+
+      const result: GameModes = {
+        hasSinglePlayer: hasCategory(CATEGORY_IDS.SINGLE_PLAYER),
+        hasMultiplayer: hasCategory(CATEGORY_IDS.MULTIPLAYER) || hasCategory(CATEGORY_IDS.ONLINE_MULTIPLAYER),
+        hasCoOp: hasCategory(CATEGORY_IDS.CO_OP),
+        hasOnlineCoOp: hasCategory(CATEGORY_IDS.ONLINE_CO_OP),
+        hasLocalCoOp: hasCategory(CATEGORY_IDS.LOCAL_CO_OP),
+        hasPvP: hasCategory(CATEGORY_IDS.PVP),
+        hasOnlinePvP: hasCategory(CATEGORY_IDS.ONLINE_MULTIPLAYER),
+        hasLocalPvP: hasCategory(CATEGORY_IDS.LOCAL_PVP),
+        hasCrossplatform: hasCategory(CATEGORY_IDS.CROSS_PLATFORM),
+        isMMO: hasCategory(CATEGORY_IDS.MMO),
+      };
+
+      this.cache.set(cacheKey, result, this.config.cacheTtlMs);
+      return result;
+    } catch {
+      this.cache.set(cacheKey, defaultModes, this.config.cacheTtlMs);
+      return defaultModes;
+    }
+  }
+
+  /**
+   * Get controller support level for a game
+   */
+  async getControllerSupport(appId: number): Promise<"full" | "partial" | null> {
+    const cacheKey = `controller:${appId}`;
+    const cached = this.cache.get(cacheKey) as "full" | "partial" | null | undefined;
+    if (cached !== undefined) {
+      this.stats.cacheHits++;
+      return cached;
+    }
+
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
+
+    try {
+      const data = await this.fetchWithRetry<SteamAppDetailsResponse>(url);
+      const appData = data[appId.toString()];
+
+      if (!appData?.success || !appData.data?.categories) {
+        this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+        return null;
+      }
+
+      const categories = appData.data.categories;
+      const hasCategory = (id: number) => categories.some((c) => c.id === id);
+
+      let result: "full" | "partial" | null = null;
+      if (hasCategory(CATEGORY_IDS.FULL_CONTROLLER)) {
+        result = "full";
+      } else if (hasCategory(CATEGORY_IDS.PARTIAL_CONTROLLER)) {
+        result = "partial";
+      }
+
+      this.cache.set(cacheKey, result, this.config.cacheTtlMs);
+      return result;
+    } catch {
+      this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+      return null;
+    }
+  }
+
+  /**
    * Get client statistics
    */
   getStats(): SteamClientStats {
@@ -368,3 +625,7 @@ export const steam = new SteamClient();
 // Backward-compatible function exports
 export const fetchSteamData = (appId: number) => steam.fetchSteamData(appId);
 export const isGame = (appId: number) => steam.isGame(appId);
+export const isEarlyAccess = (appId: number) => steam.isEarlyAccess(appId);
+export const getControllerSupport = (appId: number) => steam.getControllerSupport(appId);
+export const getReleaseDate = (appId: number) => steam.getReleaseDate(appId);
+export const getGameModes = (appId: number) => steam.getGameModes(appId);

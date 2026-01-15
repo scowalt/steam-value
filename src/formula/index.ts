@@ -8,21 +8,31 @@ export interface ValueScoreInput {
   hltbMainExtra: number | null;
   hltbCompletionist: number | null;
   isEndless?: boolean | null;
+  releaseDate?: string | null; // ISO date string "YYYY-MM-DD"
 }
 
 /**
  * Calculate the value score for a game.
  *
  * The formula rewards:
- * - Higher review scores
+ * - Higher review scores (with Bayesian confidence scaling)
  * - Shorter completion times (quality density)
- * - Optionally: more reviews (higher confidence)
+ * - Newer releases (age decay)
  *
  * Returns null if required data is missing.
  */
 export function calculateValueScore(input: ValueScoreInput): number | null {
-  const { steamReviewScore, steamReviewCount, hltbMain, hltbMainExtra, hltbCompletionist, isEndless } = input;
-  const { timeMetric, reviewScoreExponent, hoursPenaltyExponent, minHours, reviewCountWeight, minReviewCount } = formulaConfig;
+  const { steamReviewScore, steamReviewCount, hltbMain, hltbMainExtra, hltbCompletionist, isEndless, releaseDate } = input;
+  const {
+    timeMetric,
+    reviewScoreExponent,
+    hoursPenaltyExponent,
+    minHours,
+    confidenceThreshold,
+    baselineScore,
+    ageDecayPerYear,
+    minAgeMultiplier,
+  } = formulaConfig;
 
   // Endless games (MMO/survival/multiplayer) don't get value scores
   if (isEndless) {
@@ -56,14 +66,27 @@ export function calculateValueScore(input: ValueScoreInput): number | null {
   // Apply minimum hours floor
   const effectiveHours = Math.max(hours, minHours);
 
+  // Bayesian confidence scaling: pull low-review scores toward baseline
+  let confidenceScore = steamReviewScore;
+  if (steamReviewCount && steamReviewCount > 0) {
+    const confidence = steamReviewCount / (steamReviewCount + confidenceThreshold);
+    confidenceScore = steamReviewScore * confidence + baselineScore * (1 - confidence);
+  } else {
+    // No reviews = baseline score
+    confidenceScore = baselineScore;
+  }
+
   // Base formula: quality^exponent / time^exponent
-  const adjustedScore = Math.pow(steamReviewScore, reviewScoreExponent);
+  const adjustedScore = Math.pow(confidenceScore, reviewScoreExponent);
   let score = adjustedScore / Math.pow(effectiveHours, hoursPenaltyExponent);
 
-  // Apply review count bonus (more reviews = more confidence)
-  if (reviewCountWeight > 0 && steamReviewCount && steamReviewCount > 0) {
-    const countBonus = 1 + Math.log10(steamReviewCount) * reviewCountWeight;
-    score *= countBonus;
+  // Age decay: penalize older games
+  if (releaseDate) {
+    const releaseYear = new Date(releaseDate).getFullYear();
+    const currentYear = new Date().getFullYear();
+    const yearsOld = currentYear - releaseYear;
+    const ageMultiplier = Math.max(minAgeMultiplier, 1 - yearsOld * ageDecayPerYear);
+    score *= ageMultiplier;
   }
 
   return Math.round(score * 100) / 100; // Round to 2 decimal places
@@ -80,6 +103,7 @@ export function calculateGameValueScore(game: Game): number | null {
     hltbMainExtra: game.hltbMainExtra,
     hltbCompletionist: game.hltbCompletionist,
     isEndless: game.isEndless,
+    releaseDate: game.releaseDate,
   });
 }
 
