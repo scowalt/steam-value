@@ -4,13 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "add": "op run -- bun scripts/add-game.ts",
-    "list": "op run -- bun scripts/list.ts",
-    "recalc": "op run -- bun scripts/recalculate.ts",
-    "web": "op run -- bun src/web/server.ts",
-    "db:generate": "op run -- bunx drizzle-kit generate",
-    "db:push": "op run -- bunx drizzle-kit push",
-    "db:studio": "op run -- bunx drizzle-kit studio"
+    "add": "doppler run --project steam-value --config dev -- bun scripts/add-game.ts",
+    "list": "doppler run --project steam-value --config dev -- bun scripts/list.ts",
+    "recalc": "doppler run --project steam-value --config dev -- bun scripts/recalculate.ts",
+    "web": "doppler run --project steam-value --config dev -- bun src/web/server.ts",
+    "db:generate": "doppler run --project steam-value --config dev -- bunx drizzle-kit generate",
+    "db:push": "doppler run --project steam-value --config dev -- bunx drizzle-kit push",
+    "db:studio": "doppler run --project steam-value --config dev -- bunx drizzle-kit studio"
   },
   "devDependencies": {
     "@types/bun": "latest",

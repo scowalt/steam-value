@@ -1,0 +1,5 @@
+pre-commit:
+  commands:
+    secrets:
+      run: gitleaks git --staged --verbose --redact --no-banner
+      stage_fixed: true
