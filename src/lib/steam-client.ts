@@ -598,6 +598,56 @@ export class SteamClient {
   }
 
   /**
+   * Get tags (genres + categories) for a game
+   * Returns a deduplicated array of tag strings, or null if unavailable
+   */
+  async getTags(appId: number): Promise<string[] | null> {
+    const cacheKey = `tags:${appId}`;
+    const cached = this.cache.get(cacheKey) as string[] | null | undefined;
+    if (cached !== undefined) {
+      this.stats.cacheHits++;
+      return cached;
+    }
+
+    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
+
+    try {
+      const data = await this.fetchWithRetry<SteamAppDetailsResponse>(url);
+      const appData = data[appId.toString()];
+
+      if (!appData?.success || !appData.data) {
+        this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+        return null;
+      }
+
+      const tags: string[] = [];
+
+      // Add genres (e.g., "Action", "Strategy", "Early Access")
+      if (appData.data.genres) {
+        for (const genre of appData.data.genres) {
+          tags.push(genre.description);
+        }
+      }
+
+      // Add categories (e.g., "Single-player", "Multi-player", "Co-op")
+      if (appData.data.categories) {
+        for (const category of appData.data.categories) {
+          tags.push(category.description);
+        }
+      }
+
+      // Deduplicate
+      const uniqueTags = [...new Set(tags)];
+
+      this.cache.set(cacheKey, uniqueTags, this.config.cacheTtlMs);
+      return uniqueTags;
+    } catch {
+      this.cache.set(cacheKey, null, this.config.cacheTtlMs);
+      return null;
+    }
+  }
+
+  /**
    * Get client statistics
    */
   getStats(): SteamClientStats {
@@ -629,3 +679,4 @@ export const isEarlyAccess = (appId: number) => steam.isEarlyAccess(appId);
 export const getControllerSupport = (appId: number) => steam.getControllerSupport(appId);
 export const getReleaseDate = (appId: number) => steam.getReleaseDate(appId);
 export const getGameModes = (appId: number) => steam.getGameModes(appId);
+export const getTags = (appId: number) => steam.getTags(appId);

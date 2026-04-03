@@ -30,6 +30,7 @@ export const games = sqliteTable("games", {
   hasLocalPvP: integer("has_local_pvp", { mode: "boolean" }).default(false),
   hasCrossplatform: integer("has_crossplatform", { mode: "boolean" }).default(false),
   isMMO: integer("is_mmo", { mode: "boolean" }).default(false),
+  tags: text("tags"), // JSON array of tag strings e.g. '["City Builder","Strategy"]'
   createdAt: integer("created_at", { mode: "timestamp" })
     .$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" })
