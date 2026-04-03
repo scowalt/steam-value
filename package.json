@@ -10,7 +10,9 @@
     "web": "doppler run --project steam-value --config dev -- bun src/web/server.ts",
     "db:generate": "doppler run --project steam-value --config dev -- bunx drizzle-kit generate",
     "db:push": "doppler run --project steam-value --config dev -- bunx drizzle-kit push",
-    "db:studio": "doppler run --project steam-value --config dev -- bunx drizzle-kit studio"
+    "db:studio": "doppler run --project steam-value --config dev -- bunx drizzle-kit studio",
+    "import": "doppler run --project steam-value --config dev -- bun scripts/import-steamspy-catalog.ts",
+    "hydrate:tags": "doppler run --project steam-value --config dev -- bun scripts/hydrate-tags.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
