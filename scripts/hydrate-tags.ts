@@ -1,12 +1,47 @@
 #!/usr/bin/env bun
 /**
- * Hydrate tags (genres + categories) for all games missing them.
+ * Hydrate tags from SteamSpy community tags for all games missing them.
  * Usage: bun scripts/hydrate-tags.ts [--limit N]
+ *
+ * SteamSpy tags are community-driven and much richer than Steam's built-in
+ * genres/categories — they include tags like "City Builder", "Colony Sim",
+ * "Roguelike", "Souls-like", etc.
  */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
-import { steam } from "../src/lib/steam-client";
 import { eq, isNull } from "drizzle-orm";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface SteamSpyResponse {
+  tags?: Record<string, number>;
+}
+
+/**
+ * Fetch community tags from SteamSpy for a given app ID.
+ * Returns tag names sorted by usage count (descending).
+ */
+async function fetchSteamSpyTags(appId: number): Promise<string[] | null> {
+  const url = `https://steamspy.com/api.php?request=appdetails&appid=${appId}`;
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`SteamSpy returned HTTP ${response.status}`);
+  }
+
+  const data = (await response.json()) as SteamSpyResponse;
+
+  if (!data.tags || typeof data.tags !== "object") {
+    return null;
+  }
+
+  // Sort by usage count descending, return tag names
+  const sorted = Object.entries(data.tags)
+    .sort(([, a], [, b]) => b - a)
+    .map(([name]) => name);
+
+  return sorted.length > 0 ? sorted : null;
+}
 
 async function main() {
   const limitArg = process.argv.indexOf("--limit");
@@ -27,8 +62,13 @@ async function main() {
   for (const game of gamesToHydrate) {
     processed++;
 
+    // Rate limit: 1 request per second for SteamSpy
+    if (processed > 1) {
+      await sleep(1000);
+    }
+
     try {
-      const tags = await steam.getTags(game.steamAppId);
+      const tags = await fetchSteamSpyTags(game.steamAppId);
 
       if (tags && tags.length > 0) {
         await db
