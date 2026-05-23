@@ -43,6 +43,18 @@ const limit = 100;
 let allLoaded = false;
 let allGames: Game[] = [];
 
+interface SyncState {
+  lastAttemptAt: number | null;
+  lastSuccessAt: number | null;
+  lastError: string | null;
+  isRunning: boolean;
+  ignoredCount: number;
+  wishlistCount: number;
+  ownedCount: number;
+  gamesUpdated: number;
+  gamesRemoved: number;
+}
+
 interface SyncResult {
   success: boolean;
   ignoredCount: number;
@@ -51,6 +63,8 @@ interface SyncResult {
   gamesUpdated: number;
   gamesRemoved: number;
   error?: string;
+  skipped?: boolean;
+  state?: SyncState | null;
 }
 
 function getFilterParams(): URLSearchParams {
@@ -76,7 +90,7 @@ async function loadGames() {
   params.set("offset", offset.toString());
 
   const res = await fetch(`/api/games?${params.toString()}`);
-  const games: Game[] = await res.json();
+  const games = (await res.json()) as Game[];
 
   if (games.length < limit) {
     allLoaded = true;
@@ -162,34 +176,72 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
+async function loadSyncState() {
+  try {
+    const res = await fetch("/api/sync-state");
+    if (!res.ok) return;
+
+    const state = (await res.json()) as SyncState | null;
+    renderSyncState(state);
+  } catch {
+    // Keep the games list usable even if status metadata fails to load.
+  }
+}
+
+function renderSyncState(state: SyncState | null) {
+  if (!state) {
+    syncStatus.textContent = "Never refreshed";
+    return;
+  }
+
+  if (state.isRunning) {
+    syncStatus.textContent = "Refresh running...";
+    return;
+  }
+
+  const parts = [];
+  if (state.lastSuccessAt) parts.push(`Last refreshed ${formatUnixTime(state.lastSuccessAt)}`);
+  if (state.gamesUpdated > 0) parts.push(`${state.gamesUpdated} updated`);
+  if (state.lastError) parts.push(`Last error: ${state.lastError}`);
+
+  syncStatus.textContent = parts.length > 0 ? parts.join(" · ") : "No refresh yet";
+}
+
+function formatUnixTime(value: number): string {
+  return new Date(value * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 async function syncWithSteam() {
   syncBtn.disabled = true;
-  syncBtn.textContent = "Syncing...";
-  syncStatus.textContent = "";
+  syncBtn.textContent = "Refreshing...";
+  syncStatus.textContent = "Refreshing Steam Status...";
 
   try {
     const res = await fetch("/api/sync", { method: "POST" });
-    const result: SyncResult = await res.json();
+    const result = (await res.json()) as SyncResult;
 
     if (result.success) {
-      const parts = [];
-      if (result.gamesRemoved > 0) parts.push(`${result.gamesRemoved} removed`);
-      if (result.gamesUpdated > 0) parts.push(`${result.gamesUpdated} updated`);
-      syncStatus.textContent = parts.length > 0 ? parts.join(", ") : "Already in sync";
+      renderSyncState(result.state ?? null);
 
       if (result.gamesUpdated > 0 || result.gamesRemoved > 0) {
         // Refresh the list if games were changed
         resetAndLoad();
       }
     } else {
-      syncStatus.textContent = result.error || "Sync failed";
+      syncStatus.textContent = result.error || "Refresh failed";
+      await loadSyncState();
     }
-  } catch (error) {
-    syncStatus.textContent = "Sync error";
+  } catch {
+    syncStatus.textContent = "Refresh error";
   }
 
   syncBtn.disabled = false;
-  syncBtn.textContent = "Sync with Steam";
+  syncBtn.textContent = "Refresh Steam Status";
 }
 
 loadMoreBtn.addEventListener("click", loadGames);
@@ -202,3 +254,4 @@ singleOnlyCheckbox.addEventListener("change", resetAndLoad);
 coopFilter.addEventListener("change", resetAndLoad);
 controllerFilter.addEventListener("change", resetAndLoad);
 loadGames();
+loadSyncState();
