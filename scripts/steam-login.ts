@@ -72,10 +72,9 @@ async function updateEnvFile(cookie: string): Promise<void> {
     await Bun.write(ENV_FILE, content);
     console.log("[Steam Session] Updated .env with fresh cookie");
   } catch (error) {
-    // Can't write to .env (permission issue) - print cookie for manual update
+    // Can't write to .env (permission issue). Do not print the cookie to logs.
     console.log("\n[Steam Session] Cannot write to .env (permission denied)");
-    console.log("[Steam Session] Add this to your .env file:\n");
-    console.log(`STEAM_LOGIN_SECURE=${cookie}`);
+    console.log("[Steam Session] Cookie was refreshed in memory, but not persisted. Fix .env permissions or use scripts/steam-get-refresh-token.ts to save it to Doppler.");
   }
 }
 

@@ -38,5 +38,23 @@ export const games = sqliteTable("games", {
     .$onUpdate(() => new Date()),
 });
 
+export const syncState = sqliteTable("sync_state", {
+  key: text("key").primaryKey(),
+  lastAttemptAt: integer("last_attempt_at"),
+  lastSuccessAt: integer("last_success_at"),
+  lastError: text("last_error"),
+  isRunning: integer("is_running", { mode: "boolean" }).notNull().default(false),
+  lockExpiresAt: integer("lock_expires_at"),
+  ignoredCount: integer("ignored_count").notNull().default(0),
+  wishlistCount: integer("wishlist_count").notNull().default(0),
+  ownedCount: integer("owned_count").notNull().default(0),
+  gamesUpdated: integer("games_updated").notNull().default(0),
+  gamesRemoved: integer("games_removed").notNull().default(0),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .$defaultFn(() => new Date())
+    .$onUpdate(() => new Date()),
+});
+
 export type Game = typeof games.$inferSelect;
 export type NewGame = typeof games.$inferInsert;
+export type SyncState = typeof syncState.$inferSelect;

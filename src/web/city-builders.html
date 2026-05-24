@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>City Builder Games — Controller Support</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+    header { background: #16213e; padding: 24px 32px; border-bottom: 2px solid #0f3460; }
+    header h1 { font-size: 1.6rem; color: #e94560; margin-bottom: 4px; }
+    header .subtitle { font-size: 0.9rem; color: #a0a0b0; }
+    .controls { padding: 16px 32px; display: flex; align-items: center; gap: 16px; }
+    .controls input {
+      flex: 1; max-width: 400px; padding: 10px 14px; border-radius: 6px;
+      border: 1px solid #0f3460; background: #16213e; color: #e0e0e0;
+      font-size: 0.95rem; outline: none;
+    }
+    .controls input:focus { border-color: #e94560; }
+    .controls input::placeholder { color: #606080; }
+    .table-wrap { padding: 0 32px 32px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th {
+      background: #16213e; color: #e94560; padding: 10px 12px; text-align: left;
+      font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;
+      cursor: pointer; user-select: none; white-space: nowrap; position: sticky; top: 0;
+    }
+    th:hover { background: #1a2a4e; }
+    th .arrow { margin-left: 4px; font-size: 0.7rem; opacity: 0.5; }
+    th.active .arrow { opacity: 1; }
+    td { padding: 9px 12px; font-size: 0.9rem; border-bottom: 1px solid #1e2a4a; }
+    tr:nth-child(even) td { background: rgba(22, 33, 62, 0.4); }
+    tr:hover td { background: rgba(233, 69, 96, 0.08); }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    td.name { max-width: 300px; }
+    td a { color: #5dade2; text-decoration: none; }
+    td a:hover { text-decoration: underline; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-full { background: #0f3460; color: #5dade2; }
+    .badge-partial { background: #2c2c3e; color: #a0a0b0; }
+    .null { color: #505068; }
+    .count { color: #808090; font-size: 0.85rem; }
+    @media (max-width: 768px) {
+      header, .controls, .table-wrap { padding-left: 12px; padding-right: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>City Builder Games &mdash; Controller Support</h1>
+    <div class="subtitle" id="subtitle">Loading...</div>
+  </header>
+  <div class="controls">
+    <input type="text" id="search" placeholder="Search games..." autocomplete="off">
+    <span class="count" id="visible-count"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-key="idx" data-type="number"># <span class="arrow">&#9650;</span></th>
+          <th data-key="name" data-type="string">Game <span class="arrow">&#9650;</span></th>
+          <th data-key="steam_review_score" data-type="number">Review % <span class="arrow">&#9650;</span></th>
+          <th data-key="steam_review_count" data-type="number">Reviews <span class="arrow">&#9650;</span></th>
+          <th data-key="hltb_main" data-type="number">HLTB <span class="arrow">&#9650;</span></th>
+          <th data-key="controller_support" data-type="string">Controller <span class="arrow">&#9650;</span></th>
+          <th data-key="playtime_minutes" data-type="number">Played <span class="arrow">&#9650;</span></th>
+          <th data-key="tag_rank" data-type="number">Tag Rank <span class="arrow">&#9650;</span></th>
+          <th data-key="value_score" data-type="number">Value Score <span class="arrow">&#9650;</span></th>
+          <th data-key="weighted_score" data-type="number">Weighted <span class="arrow">&#9650;</span></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let games = [];
+    let sortKey = "weighted_score";
+    let sortAsc = false;
+
+    function fmt(n) { return n == null ? null : n.toLocaleString(); }
+    function fmtH(n) { return n == null ? null : n.toFixed(1) + "h"; }
+    function fmtMin(n) { return n == null ? null : (n / 60).toFixed(1) + "h"; }
+    function fmtScore(n) { return n == null ? null : n.toFixed(1); }
+    function nil(s) { return s == null ? '<span class="null">&mdash;</span>' : s; }
+
+    function escapeHtml(value) {
+      const div = document.createElement("div");
+      div.textContent = String(value);
+      return div.innerHTML;
+    }
+
+    function badge(s) {
+      if (!s) return '<span class="null">&mdash;</span>';
+      const cls = s === "full" ? "badge-full" : "badge-partial";
+      return `<span class="badge ${cls}">${escapeHtml(s)}</span>`;
+    }
+
+    function render() {
+      const q = document.getElementById("search").value.toLowerCase();
+      const filtered = games.filter(g => !q || g.name.toLowerCase().includes(q));
+
+      const sorted = [...filtered].sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        if (typeof va === "string") { va = va.toLowerCase(); vb = (vb || "").toLowerCase(); }
+        if (va < vb) return sortAsc ? -1 : 1;
+        if (va > vb) return sortAsc ? 1 : -1;
+        return 0;
+      });
+
+      const tbody = document.getElementById("tbody");
+      tbody.innerHTML = sorted.map((g, i) => `
+        <tr>
+          <td class="num">${i + 1}</td>
+          <td class="name"><a href="https://store.steampowered.com/app/${Number(g.steam_app_id)}" target="_blank" rel="noopener">${escapeHtml(g.name)}</a></td>
+          <td class="num">${nil(g.steam_review_score != null ? g.steam_review_score + "%" : null)}</td>
+          <td class="num">${nil(fmt(g.steam_review_count))}</td>
+          <td class="num">${nil(fmtH(g.hltb_main))}</td>
+          <td>${badge(g.controller_support)}</td>
+          <td class="num">${nil(fmtMin(g.playtime_minutes))}</td>
+          <td class="num">${nil(g.tag_rank != null ? '#' + g.tag_rank : null)}</td>
+          <td class="num">${nil(fmtScore(g.value_score))}</td>
+          <td class="num">${nil(fmtScore(g.weighted_score))}</td>
+        </tr>
+      `).join("");
+
+      document.getElementById("visible-count").textContent = `Showing ${sorted.length} of ${games.length}`;
+
+      document.querySelectorAll("th").forEach(th => {
+        th.classList.toggle("active", th.dataset.key === sortKey);
+        const arrow = th.querySelector(".arrow");
+        if (th.dataset.key === sortKey) {
+          arrow.innerHTML = sortAsc ? "&#9650;" : "&#9660;";
+        } else {
+          arrow.innerHTML = "&#9650;";
+        }
+      });
+    }
+
+    document.querySelectorAll("th").forEach(th => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.key;
+        if (sortKey === key) { sortAsc = !sortAsc; }
+        else { sortKey = key; sortAsc = th.dataset.type === "string"; }
+        render();
+      });
+    });
+
+    document.getElementById("search").addEventListener("input", render);
+
+    fetch("/api/city-builders")
+      .then(r => r.json())
+      .then(data => {
+        games = data;
+        games.forEach((g, i) => g.idx = i + 1);
+        document.getElementById("subtitle").textContent =
+          `City Builder tag | Full or partial controller | Not ignored | Unplayed or < 1h | Sorted by weighted score (value × tag relevance) | ${games.length} games`;
+        render();
+      })
+      .catch(err => {
+        document.getElementById("subtitle").textContent = "Error loading data: " + err.message;
+      });
+  </script>
+</body>
+</html>

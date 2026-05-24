@@ -7,16 +7,25 @@
     "add": "doppler run --project steam-value --config dev -- bun scripts/add-game.ts",
     "list": "doppler run --project steam-value --config dev -- bun scripts/list.ts",
     "recalc": "doppler run --project steam-value --config dev -- bun scripts/recalculate.ts",
-    "web": "doppler run --project steam-value --config dev -- bun src/web/server.ts",
+    "typecheck": "bunx tsc -p tsconfig.worker.json && bunx tsc -p tsconfig.web.json",
+    "build": "bun run typecheck && bun scripts/build-worker.ts",
+    "web": "bun run secrets:dev && bun run build && bunx wrangler dev",
+    "worker:dev": "bun run web",
+    "secrets:dev": "bun scripts/cloudflare-secrets.ts dev-vars",
+    "secrets:sync": "bun scripts/cloudflare-secrets.ts sync",
     "db:generate": "doppler run --project steam-value --config dev -- bunx drizzle-kit generate",
     "db:push": "doppler run --project steam-value --config dev -- bunx drizzle-kit push",
     "db:studio": "doppler run --project steam-value --config dev -- bunx drizzle-kit studio",
+    "db:setup-worker": "doppler run --project steam-value --config dev -- bun scripts/setup-worker-db.ts",
     "import": "doppler run --project steam-value --config dev -- bun scripts/import-steamspy-catalog.ts",
-    "hydrate:tags": "doppler run --project steam-value --config dev -- bun scripts/hydrate-tags.ts"
+    "hydrate:tags": "doppler run --project steam-value --config dev -- bun scripts/hydrate-tags.ts",
+    "hydrate-daily": "doppler run --project steam-value --config dev -- bun scripts/hydrate-daily.ts"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260522.1",
     "@types/bun": "latest",
-    "drizzle-kit": "^0.31.8"
+    "drizzle-kit": "^0.31.8",
+    "wrangler": "^4.94.0"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -25,6 +34,7 @@
     "@libsql/client": "^0.17.0",
     "drizzle-orm": "^0.45.1",
     "howlongtobeat": "^1.8.0",
-    "playwright": "^1.57.0"
+    "playwright": "^1.57.0",
+    "steam-session": "^1.9.4"
   }
 }

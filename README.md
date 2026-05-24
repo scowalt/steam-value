@@ -15,9 +15,24 @@ High-rated, shorter games rank higher than mediocre, long ones. The formula is c
 ## Data Sources
 
 - **Steam API** — reviews, app details, ownership, wishlist, ignored list
-- **HowLongToBeat** — completion times (scraped via Playwright)
+- **HowLongToBeat** — completion times (manual/batch enrichment)
 - **Wikidata** — Steam ID to HLTB ID mappings
 - **SteamDB dataset** — local lookup for fast mapping
+
+## Architecture
+
+The always-on web surface runs as a **Cloudflare Worker with Static Assets** at `steam-value.scowalt.com`, protected by Cloudflare Access.
+
+- **Cloudflare Worker**: serves static assets, `GET /api/games`, `POST /api/sync`, `GET /api/sync-state`, and daily scheduled Steam Status refresh.
+- **Turso**: remains the production SQLite database for both the Worker and admin scripts.
+- **Doppler**: remains the source of truth for secrets. Selected secrets are mirrored to Cloudflare Worker secrets outside OpenTofu.
+- **Mission-control OpenTofu**: owns the Worker script/assets, custom domain, cron trigger, disabled workers.dev subdomain, and Cloudflare Access application.
+
+Operational boundaries:
+
+- **Steam Status** (wishlist, ignored, ownership, playtime): refreshed daily by Worker cron and manually via the UI.
+- **Catalog Facts** (tags, controller support, game modes, release dates): refreshed by occasional external/admin jobs.
+- **HowLongToBeat estimates**: manual/batch enrichment only; not run in the Worker.
 
 ## Usage
 
@@ -30,8 +45,8 @@ bun add -- 292030        # The Witcher 3
 # List all games sorted by value
 bun list
 
-# Start the web UI
-bun web                  # http://localhost:3000
+# Start local Worker dev (writes .dev.vars from Doppler, builds assets, runs Wrangler/Miniflare)
+bun web
 
 # Recalculate all scores (after config changes)
 bun recalc
@@ -39,21 +54,53 @@ bun recalc
 
 ## Web UI
 
-Browse and filter your game library at `http://localhost:3000`:
+Browse and filter your game library through the Cloudflare Worker:
 
 - Sort by value score, reviews, or time-to-beat
 - Filter: hide early access, hide played, hide MMO, hide ignored
 - Filter by co-op mode (any, online, local) and controller support
 - Links directly to Steam Store pages
-- Auto-syncs wishlist/ownership every 5 minutes
+- Shows last Steam Status refresh metadata
+- Allows a manual **Refresh Steam Status** action
+
+Local web development uses Wrangler/Miniflare, not the old Bun server:
+
+```bash
+bun web
+```
+
+## Build and Deploy
+
+Build the Worker bundle and static assets:
+
+```bash
+bun run build
+```
+
+Sync Worker secrets from Doppler to Cloudflare. In non-interactive shells, run it with the mission-control Cloudflare API token in the environment:
+
+```bash
+doppler run --project mission-control --config dev -- bun run secrets:sync
+```
+
+Apply Cloudflare infrastructure from mission-control:
+
+```bash
+cd /home/scowalt/Code/opentofu
+doppler run --project mission-control --config dev -- tofu plan
+doppler run --project mission-control --config dev -- tofu apply
+```
+
+The OpenTofu config reads built artifacts from `steam-value/dist`, so run `bun run build` before planning/applying Worker changes.
 
 ## Database
 
-Turso (SQLite) via Drizzle ORM.
+Turso (SQLite) via Drizzle ORM for admin scripts. The Worker uses raw libSQL queries to keep edge runtime behavior explicit.
 
 ```bash
-bun db:push     # Push schema changes
-bun db:studio   # Open Drizzle Studio
+bun db:push             # Push schema changes
+bun db:setup-worker     # Create Worker sync metadata table and indexes
+bun db:studio           # Open Drizzle Studio
 ```
 
 ## Scripts
@@ -63,9 +110,14 @@ bun db:studio   # Open Drizzle Studio
 | `bun add -- <appId>` | Add a game with HLTB verification |
 | `bun list` | List all games with scores |
 | `bun recalc` | Recalculate all value scores |
-| `bun web` | Start the web UI |
+| `bun web` | Build and run the Worker locally through Wrangler/Miniflare |
+| `bun run build` | Build static assets and Worker bundle into `dist/` |
+| `bun run secrets:dev` | Write selected Doppler secrets to `.dev.vars` for local Worker dev |
+| `bun run secrets:sync` | Upload selected Doppler secrets to Cloudflare Worker secrets |
+| `bun run db:setup-worker` | Prepare Turso sync metadata table and Worker indexes |
+| `bun run hydrate-daily` | Manual external Steam Status refresh fallback |
 
-Hydration scripts in `scripts/` bulk-fetch data from Steam and HLTB.
+Hydration scripts in `scripts/` bulk-fetch Catalog Facts from Steam, SteamSpy, Wikidata, and HLTB. They remain external/admin jobs and write directly to Turso.
 
 ## Secrets
 
@@ -79,10 +131,12 @@ Managed via Doppler (`steam-value` project):
 | `STEAM_ID` | Your Steam profile ID |
 | `STEAM_LOGIN_SECURE` | Steam login cookie (for wishlist/ignored sync) |
 
+For local Worker dev, run `bun run secrets:dev`. For Cloudflare runtime, run `doppler run --project mission-control --config dev -- bun run secrets:sync` so Wrangler has a Cloudflare API token. Secrets are intentionally kept out of OpenTofu state.
+
 ## Tech Stack
 
-- **Runtime**: Bun
+- **Runtime**: Cloudflare Workers for the web surface; Bun for local scripts
 - **Language**: TypeScript
-- **Database**: Turso (SQLite) + Drizzle ORM
-- **Web**: Bun.serve() with vanilla HTML/TypeScript
-- **Scraping**: Playwright (HLTB pages)
+- **Database**: Turso (SQLite) + Drizzle ORM for admin scripts + raw libSQL in Worker
+- **Web**: Cloudflare Worker Static Assets with vanilla HTML/TypeScript
+- **Scraping**: Playwright / manual external jobs for HLTB-related workflows
