@@ -45,6 +45,9 @@ bun add -- 292030        # The Witcher 3
 # List all games sorted by value
 bun list
 
+# Refresh Steam catalog rows and review scores/counts
+bun run catalog:refresh
+
 # Start local Worker dev (writes .dev.vars from Doppler, builds assets, runs Wrangler/Miniflare)
 bun web
 
@@ -110,6 +113,7 @@ bun db:studio           # Open Drizzle Studio
 | `bun add -- <appId>` | Add a game with HLTB verification |
 | `bun list` | List all games with scores |
 | `bun recalc` | Recalculate all value scores |
+| `bun run catalog:refresh` | Upsert Steam catalog rows and refresh review scores/counts |
 | `bun web` | Build and run the Worker locally through Wrangler/Miniflare |
 | `bun run build` | Build static assets and Worker bundle into `dist/` |
 | `bun run secrets:dev` | Write selected Doppler secrets to `.dev.vars` for local Worker dev |
@@ -118,6 +122,35 @@ bun db:studio           # Open Drizzle Studio
 | `bun run hydrate-daily` | Manual external Steam Status refresh fallback |
 
 Hydration scripts in `scripts/` bulk-fetch Catalog Facts from Steam, SteamSpy, Wikidata, and HLTB. They remain external/admin jobs and write directly to Turso.
+
+### Steam catalog refresh
+
+`bun run catalog:refresh` uses official Steam endpoints instead of SteamSpy for the reliability-critical catalog path:
+
+1. `IStoreService/GetAppList` with `include_games=true` supplies the Steam app catalog.
+2. `store.steampowered.com/appreviews/<appId>` supplies review totals for each app.
+3. Turso rows are upserted for new games above the review threshold, and existing rows refresh `name`, `steam_review_score`, and `steam_review_count`.
+
+The job checkpoints progress in `catalog_refresh_state` and records per-app failures in `catalog_refresh_failures`, so a full-catalog run can resume after interruption. It is safe to rerun.
+
+Defaults:
+
+- `--min-reviews 10` inserts new games with at least 10 total Steam reviews. Existing rows refresh even if their count later falls below the threshold.
+- `--review-delay-ms 500` waits between per-app review requests.
+- `--retries 5` with `--retry-delay-ms 5000` handles transient Steam failures.
+- `--batch-size 200` writes Turso changes in batches.
+- `--checkpoint-every 50` persists progress every 50 processed apps.
+
+Useful examples:
+
+```bash
+bun run catalog:refresh -- --dry-run --limit-apps 25
+bun run catalog:refresh -- --restart                 # fresh full run
+bun run catalog:refresh -- --min-reviews 100         # old import threshold
+bun run catalog:refresh -- --start-after-app-id 620  # manual resume point
+```
+
+After a non-dry refresh that updates existing ratings, run `bun recalc` so value scores use the latest review data.
 
 ## Secrets
 

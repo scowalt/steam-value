@@ -1,0 +1,15 @@
+#!/usr/bin/env bun
+/**
+ * Backwards-compatible alias for the official Steam catalog refresh job.
+ *
+ * SteamSpy is intentionally no longer used as the default source because its
+ * public endpoint frequently returns "Connection failed: Too many connections".
+ */
+import { main } from "./refresh-steam-catalog";
+
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error("Error:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}
