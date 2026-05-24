@@ -17,7 +17,7 @@
     "db:push": "doppler run --project steam-value --config dev -- bunx drizzle-kit push",
     "db:studio": "doppler run --project steam-value --config dev -- bunx drizzle-kit studio",
     "db:setup-worker": "doppler run --project steam-value --config dev -- bun scripts/setup-worker-db.ts",
-    "catalog:refresh": "doppler run --project steam-value --config dev -- bun scripts/refresh-steamspy-catalog.ts",
+    "catalog:refresh": "doppler run --project steam-value --config dev -- bun scripts/refresh-steam-catalog.ts",
     "import": "doppler run --project steam-value --config dev -- bun scripts/import-steamspy-catalog.ts",
     "hydrate:tags": "doppler run --project steam-value --config dev -- bun scripts/hydrate-tags.ts",
     "hydrate-daily": "doppler run --project steam-value --config dev -- bun scripts/hydrate-daily.ts"

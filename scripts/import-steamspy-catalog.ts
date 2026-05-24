@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Backwards-compatible alias for the SteamSpy catalog refresh job.
+ * Backwards-compatible alias for the official Steam catalog refresh job.
  */
-import { main } from "./refresh-steamspy-catalog";
+import { main } from "./refresh-steam-catalog";
 
 if (import.meta.main) {
   main().catch((error) => {
