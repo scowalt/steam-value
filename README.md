@@ -45,6 +45,9 @@ bun add -- 292030        # The Witcher 3
 # List all games sorted by value
 bun list
 
+# Refresh SteamSpy catalog rows and review scores/counts
+bun run catalog:refresh
+
 # Start local Worker dev (writes .dev.vars from Doppler, builds assets, runs Wrangler/Miniflare)
 bun web
 
@@ -110,6 +113,7 @@ bun db:studio           # Open Drizzle Studio
 | `bun add -- <appId>` | Add a game with HLTB verification |
 | `bun list` | List all games with scores |
 | `bun recalc` | Recalculate all value scores |
+| `bun run catalog:refresh` | Upsert SteamSpy catalog rows and refresh review scores/counts |
 | `bun web` | Build and run the Worker locally through Wrangler/Miniflare |
 | `bun run build` | Build static assets and Worker bundle into `dist/` |
 | `bun run secrets:dev` | Write selected Doppler secrets to `.dev.vars` for local Worker dev |
@@ -118,6 +122,27 @@ bun db:studio           # Open Drizzle Studio
 | `bun run hydrate-daily` | Manual external Steam Status refresh fallback |
 
 Hydration scripts in `scripts/` bulk-fetch Catalog Facts from Steam, SteamSpy, Wikidata, and HLTB. They remain external/admin jobs and write directly to Turso.
+
+### Steam catalog refresh
+
+`bun run catalog:refresh` fetches every SteamSpy `request=all` page and compares it with the current Turso catalog. It upserts new games and refreshes existing `name`, `steam_review_score`, and `steam_review_count` values. The job is safe to rerun.
+
+Defaults:
+
+- `--min-reviews 10` imports/updates games with at least 10 total Steam reviews. This expands beyond the original 100-review cutoff while avoiding completely unrated apps.
+- `--page-delay-ms 1500` waits between SteamSpy page requests.
+- `--page-retries 5` with `--retry-delay-ms 5000` handles transient SteamSpy failures like "too many connections".
+- `--batch-size 200` writes Turso changes in batches.
+
+Useful examples:
+
+```bash
+bun run catalog:refresh -- --dry-run
+bun run catalog:refresh -- --min-reviews 100   # old import threshold
+bun run catalog:refresh -- --limit-pages 2 --dry-run
+```
+
+After a non-dry refresh that updates existing ratings, run `bun recalc` so value scores use the latest review data.
 
 ## Secrets
 
