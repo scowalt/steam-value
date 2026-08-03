@@ -10,9 +10,10 @@ export interface SteamStatusEnv {
   STEAM_LOGIN_SECURE?: string;
 }
 
-interface SteamUserData {
+export interface SteamUserData {
   rgIgnoredApps?: Record<string, number>;
   rgWishlist?: number[];
+  rgOwnedApps?: number[];
 }
 
 interface OwnedGame {
@@ -34,6 +35,13 @@ interface CurrentGameStatus {
   isOnWishlist: boolean;
   isOwned: boolean;
   playtimeMinutes: number | null;
+}
+
+export interface SteamStatusCounts {
+  ignoredCount: number;
+  wishlistCount: number;
+  ownedCount: number;
+  dynamicStoreOwnedCount: number;
 }
 
 export interface SyncState {
@@ -101,6 +109,31 @@ export async function syncSteamStatus(
   client: Client,
   env: SteamStatusEnv
 ): Promise<SyncResult> {
+  return runSteamStatusSync(client, async () => {
+    const [userData, ownedGames] = await Promise.all([
+      fetchSteamUserData(env),
+      fetchOwnedGames(env),
+    ]);
+
+    return { userData, ownedGames };
+  });
+}
+
+export async function syncSteamStatusFromUserData(
+  client: Client,
+  env: SteamStatusEnv,
+  userData: SteamUserData
+): Promise<SyncResult> {
+  return runSteamStatusSync(client, async () => ({
+    userData,
+    ownedGames: await fetchOwnedGames(env),
+  }));
+}
+
+async function runSteamStatusSync(
+  client: Client,
+  loadData: () => Promise<{ userData: SteamUserData; ownedGames: Map<number, number> }>
+): Promise<SyncResult> {
   await ensureSyncStateTable(client);
 
   const lockExpiresAt = await acquireSyncLock(client);
@@ -119,12 +152,16 @@ export async function syncSteamStatus(
   }
 
   try {
-    const userData = await fetchSteamUserData(env);
-    const ownedGames = await fetchOwnedGames(env);
+    const previousState = await getSyncState(client);
+    const { userData, ownedGames } = await loadData();
+    const counts = getSteamStatusCounts(userData, ownedGames);
+    const validationError = validateSteamStatusCounts(counts, previousState);
+    if (validationError) throw new Error(validationError);
+
     const currentGames = await fetchCurrentGameStatuses(client);
 
-    const ignoredSet = new Set(Object.keys(userData.rgIgnoredApps ?? {}).map(Number));
-    const wishlistSet = new Set(userData.rgWishlist ?? []);
+    const ignoredSet = new Set(Object.keys(userData.rgIgnoredApps!).map(Number));
+    const wishlistSet = new Set(userData.rgWishlist!);
 
     const updates: { sql: string; args: (number | boolean | null)[] }[] = [];
 
@@ -190,6 +227,59 @@ export async function syncSteamStatus(
       state: await getSyncState(client),
     };
   }
+}
+
+export function getSteamStatusCounts(
+  userData: SteamUserData,
+  ownedGames: Map<number, number>
+): SteamStatusCounts {
+  return {
+    ignoredCount:
+      userData.rgIgnoredApps && typeof userData.rgIgnoredApps === "object"
+        ? Object.keys(userData.rgIgnoredApps).length
+        : -1,
+    wishlistCount: Array.isArray(userData.rgWishlist) ? userData.rgWishlist.length : -1,
+    ownedCount: ownedGames.size,
+    dynamicStoreOwnedCount: Array.isArray(userData.rgOwnedApps) ? userData.rgOwnedApps.length : -1,
+  };
+}
+
+export function validateSteamStatusCounts(
+  counts: SteamStatusCounts,
+  previousState: SyncState | null
+): string | null {
+  if (counts.wishlistCount < 0 || counts.ignoredCount < 0 || counts.dynamicStoreOwnedCount < 0) {
+    return "Steam Dynamic Store returned an incomplete response";
+  }
+
+  if (counts.dynamicStoreOwnedCount === 0) {
+    return "Steam Dynamic Store session is not authenticated";
+  }
+
+  if (counts.ownedCount === 0) {
+    return "Steam owned-games API returned no games";
+  }
+
+  if (!previousState) return null;
+
+  const suspiciousDrops: string[] = [];
+  if (isSuspiciousDrop(previousState.wishlistCount, counts.wishlistCount)) {
+    suspiciousDrops.push(`wishlist ${previousState.wishlistCount} -> ${counts.wishlistCount}`);
+  }
+  if (isSuspiciousDrop(previousState.ignoredCount, counts.ignoredCount)) {
+    suspiciousDrops.push(`ignored ${previousState.ignoredCount} -> ${counts.ignoredCount}`);
+  }
+  if (isSuspiciousDrop(previousState.ownedCount, counts.ownedCount)) {
+    suspiciousDrops.push(`owned ${previousState.ownedCount} -> ${counts.ownedCount}`);
+  }
+
+  return suspiciousDrops.length > 0
+    ? `Steam Status refresh rejected suspicious count drops: ${suspiciousDrops.join(", ")}`
+    : null;
+}
+
+function isSuspiciousDrop(previous: number, current: number): boolean {
+  return previous >= 10 && current < Math.floor(previous * 0.2);
 }
 
 async function acquireSyncLock(client: Client): Promise<number | null> {

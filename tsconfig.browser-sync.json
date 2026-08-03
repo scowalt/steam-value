@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "scripts/sync-steam-status-browser.ts",
+    "src/services/steam-status-sync.ts"
+  ]
+}

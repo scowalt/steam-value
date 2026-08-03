@@ -1,0 +1,22 @@
+[Unit]
+Description=Steel browser for Steam Value
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=%t/containers
+
+[Service]
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Restart=always
+RestartSec=5
+TimeoutStopSec=70
+
+ExecStartPre=-/usr/bin/rm -f %h/.local/share/containers/storage/volumes/steel-steam-value-user-data/_data/SingletonCookie %h/.local/share/containers/storage/volumes/steel-steam-value-user-data/_data/SingletonLock %h/.local/share/containers/storage/volumes/steel-steam-value-user-data/_data/SingletonSocket
+ExecStart=/usr/bin/podman run --cidfile=%t/%n.ctr-id --cgroups=no-conmon --rm --sdnotify=conmon --replace -d --name steel-browser-steam-value -p 100.97.172.16:3002:3000 -p 100.97.172.16:9224:9223 -e DOMAIN=100.97.172.16:3002 -e HOST=0.0.0.0 -e PORT=3000 -e CHROME_HEADLESS=false -v steel-steam-value-user-data:/app/api/user-data-dir --shm-size=2g --entrypoint=/bin/sh localhost/steel-browser-steam-value:2026-08-03 -c "Xvfb :10 -screen 0 1920x1080x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & socat TCP-LISTEN:9223,fork,reuseaddr TCP:127.0.0.1:9222 & exec /app/api/entrypoint.sh"
+ExecStop=/usr/bin/podman stop --ignore -t 10 --cidfile=%t/%n.ctr-id
+ExecStopPost=/usr/bin/podman rm -f --ignore -t 10 --cidfile=%t/%n.ctr-id
+
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=default.target

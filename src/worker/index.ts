@@ -1,13 +1,10 @@
 import { createClient, type Client } from "@libsql/client/web";
-import { getSyncState, syncSteamStatus } from "../services/steam-status-sync";
+import { getSyncState } from "../services/steam-status-sync";
 import { listCityBuilderGames, listGames, parseGameQuery } from "./games";
 
 interface Env {
   TURSO_DATABASE_URL: string;
   TURSO_AUTH_TOKEN?: string;
-  STEAM_API_KEY?: string;
-  STEAM_ID?: string;
-  STEAM_LOGIN_SECURE?: string;
 }
 
 let client: Client | null = null;
@@ -22,24 +19,6 @@ export default {
       console.error("Unhandled Worker error", error);
       return json({ error: message }, { status: 500 });
     }
-  },
-
-  async scheduled(
-    _event: unknown,
-    env: Env,
-    ctx: { waitUntil(promise: Promise<unknown>): void }
-  ): Promise<void> {
-    ctx.waitUntil(
-      syncSteamStatus(getClient(env), env).then((result) => {
-        if (result.success) {
-          console.log(
-            `Daily Steam Status refresh complete: ${result.gamesUpdated} updates, ${result.ownedCount} owned, ${result.wishlistCount} wishlisted, ${result.ignoredCount} ignored`
-          );
-        } else {
-          console.error(`Daily Steam Status refresh failed: ${result.error}`);
-        }
-      })
-    );
   },
 };
 
@@ -63,11 +42,6 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "GET" && url.pathname === "/api/sync-state") {
     return json(await getSyncState(client));
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/sync") {
-    const result = await syncSteamStatus(client, env);
-    return json(result, { status: result.success ? 200 : result.skipped ? 409 : 500 });
   }
 
   if (url.pathname.startsWith("/api/")) {

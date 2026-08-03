@@ -28,7 +28,6 @@ interface Game {
 const tbody = document.getElementById("games-list")!;
 const loading = document.getElementById("loading")!;
 const loadMoreBtn = document.getElementById("load-more") as HTMLButtonElement;
-const syncBtn = document.getElementById("sync-btn") as HTMLButtonElement;
 const syncStatus = document.getElementById("sync-status")!;
 const hideEaCheckbox = document.getElementById("hide-ea") as HTMLInputElement;
 const hidePlayedCheckbox = document.getElementById("hide-played") as HTMLInputElement;
@@ -53,18 +52,6 @@ interface SyncState {
   ownedCount: number;
   gamesUpdated: number;
   gamesRemoved: number;
-}
-
-interface SyncResult {
-  success: boolean;
-  ignoredCount: number;
-  wishlistCount: number;
-  ownedCount: number;
-  gamesUpdated: number;
-  gamesRemoved: number;
-  error?: string;
-  skipped?: boolean;
-  state?: SyncState | null;
 }
 
 function getFilterParams(): URLSearchParams {
@@ -216,36 +203,7 @@ function formatUnixTime(value: number): string {
   });
 }
 
-async function syncWithSteam() {
-  syncBtn.disabled = true;
-  syncBtn.textContent = "Refreshing...";
-  syncStatus.textContent = "Refreshing Steam Status...";
-
-  try {
-    const res = await fetch("/api/sync", { method: "POST" });
-    const result = (await res.json()) as SyncResult;
-
-    if (result.success) {
-      renderSyncState(result.state ?? null);
-
-      if (result.gamesUpdated > 0 || result.gamesRemoved > 0) {
-        // Refresh the list if games were changed
-        resetAndLoad();
-      }
-    } else {
-      syncStatus.textContent = result.error || "Refresh failed";
-      await loadSyncState();
-    }
-  } catch {
-    syncStatus.textContent = "Refresh error";
-  }
-
-  syncBtn.disabled = false;
-  syncBtn.textContent = "Refresh Steam Status";
-}
-
 loadMoreBtn.addEventListener("click", loadGames);
-syncBtn.addEventListener("click", syncWithSteam);
 hideEaCheckbox.addEventListener("change", resetAndLoad);
 hidePlayedCheckbox.addEventListener("change", resetAndLoad);
 hideMMOCheckbox.addEventListener("change", resetAndLoad);

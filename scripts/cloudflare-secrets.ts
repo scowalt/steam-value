@@ -10,9 +10,6 @@
 const SECRET_KEYS = [
   "TURSO_DATABASE_URL",
   "TURSO_AUTH_TOKEN",
-  "STEAM_API_KEY",
-  "STEAM_ID",
-  "STEAM_LOGIN_SECURE",
 ];
 
 const mode = process.argv[2];

@@ -23,14 +23,15 @@ High-rated, shorter games rank higher than mediocre, long ones. The formula is c
 
 The always-on web surface runs as a **Cloudflare Worker with Static Assets** at `steam-value.scowalt.com`, protected by Cloudflare Access.
 
-- **Cloudflare Worker**: serves static assets, `GET /api/games`, `POST /api/sync`, `GET /api/sync-state`, and daily scheduled Steam Status refresh.
+- **Cloudflare Worker**: serves static assets, `GET /api/games`, and `GET /api/sync-state`.
+- **Steel on arcane**: keeps a persistent, tailnet-only Steam browser profile and runs the daily Steam Status refresh.
 - **Turso**: remains the production SQLite database for both the Worker and admin scripts.
-- **Doppler**: remains the source of truth for secrets. Selected secrets are mirrored to Cloudflare Worker secrets outside OpenTofu.
-- **Mission-control OpenTofu**: owns the Worker script/assets, custom domain, cron trigger, disabled workers.dev subdomain, and Cloudflare Access application.
+- **Doppler**: remains the source of truth for database and Steam API secrets. Only Turso secrets are mirrored to the Worker.
+- **Mission-control OpenTofu**: owns the Worker script/assets, custom domain, disabled workers.dev subdomain, and Cloudflare Access application.
 
 Operational boundaries:
 
-- **Steam Status** (wishlist, ignored, ownership, playtime): refreshed daily by Worker cron and manually via the UI.
+- **Steam Status** (wishlist, ignored, ownership, playtime): refreshed daily on arcane through a persistent Steel browser and the official owned-games API.
 - **Catalog Facts** (tags, controller support, game modes, release dates): refreshed by occasional external/admin jobs.
 - **HowLongToBeat estimates**: manual/batch enrichment only; not run in the Worker.
 
@@ -64,7 +65,6 @@ Browse and filter your game library through the Cloudflare Worker:
 - Filter by co-op mode (any, online, local) and controller support
 - Links directly to Steam Store pages
 - Shows last Steam Status refresh metadata
-- Allows a manual **Refresh Steam Status** action
 
 Local web development uses Wrangler/Miniflare, not the old Bun server:
 
@@ -117,9 +117,11 @@ bun db:studio           # Open Drizzle Studio
 | `bun web` | Build and run the Worker locally through Wrangler/Miniflare |
 | `bun run build` | Build static assets and Worker bundle into `dist/` |
 | `bun run secrets:dev` | Write selected Doppler secrets to `.dev.vars` for local Worker dev |
-| `bun run secrets:sync` | Upload selected Doppler secrets to Cloudflare Worker secrets |
+| `bun run secrets:sync` | Upload Turso secrets to Cloudflare Worker secrets |
 | `bun run db:setup-worker` | Prepare Turso sync metadata table and Worker indexes |
 | `bun run hydrate-daily` | Manual external Steam Status refresh fallback |
+| `bun run steam:browser-login` | Open a Steel session for one-time Steam login |
+| `bun run steam:browser-sync` | Run the guarded browser-backed Steam Status refresh |
 
 Hydration scripts in `scripts/` bulk-fetch Catalog Facts from Steam, SteamSpy, Wikidata, and HLTB. They remain external/admin jobs and write directly to Turso.
 
@@ -162,7 +164,8 @@ Managed via Doppler (`steam-value` project):
 | `TURSO_AUTH_TOKEN` | Turso auth token |
 | `STEAM_API_KEY` | Steam Web API key (for owned games) |
 | `STEAM_ID` | Your Steam profile ID |
-| `STEAM_LOGIN_SECURE` | Steam login cookie (for wishlist/ignored sync) |
+
+The primary Steam Status path does not export `steamLoginSecure`. Its HttpOnly cookie stays inside the dedicated Steel browser profile on arcane. The arcane deployment receives only `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `STEAM_API_KEY`, and `STEAM_ID`; see `deploy/arcane/README.md`.
 
 For local Worker dev, run `bun run secrets:dev`. For Cloudflare runtime, run `doppler run --project mission-control --config dev -- bun run secrets:sync` so Wrangler has a Cloudflare API token. Secrets are intentionally kept out of OpenTofu state.
 
@@ -172,4 +175,4 @@ For local Worker dev, run `bun run secrets:dev`. For Cloudflare runtime, run `do
 - **Language**: TypeScript
 - **Database**: Turso (SQLite) + Drizzle ORM for admin scripts + raw libSQL in Worker
 - **Web**: Cloudflare Worker Static Assets with vanilla HTML/TypeScript
-- **Scraping**: Playwright / manual external jobs for HLTB-related workflows
+- **Browser automation**: Playwright over a persistent, self-hosted Steel session for Steam Status

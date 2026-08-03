@@ -7,7 +7,7 @@
     "add": "doppler run --project steam-value --config dev -- bun scripts/add-game.ts",
     "list": "doppler run --project steam-value --config dev -- bun scripts/list.ts",
     "recalc": "doppler run --project steam-value --config dev -- bun scripts/recalculate.ts",
-    "typecheck": "bunx tsc -p tsconfig.worker.json && bunx tsc -p tsconfig.web.json",
+    "typecheck": "bunx tsc -p tsconfig.worker.json && bunx tsc -p tsconfig.web.json && bunx tsc -p tsconfig.browser-sync.json",
     "build": "bun run typecheck && bun scripts/build-worker.ts",
     "web": "bun run secrets:dev && bun run build && bunx wrangler dev",
     "worker:dev": "bun run web",
@@ -20,7 +20,9 @@
     "catalog:refresh": "doppler run --project steam-value --config dev -- bun scripts/refresh-steam-catalog.ts",
     "import": "doppler run --project steam-value --config dev -- bun scripts/import-steamspy-catalog.ts",
     "hydrate:tags": "doppler run --project steam-value --config dev -- bun scripts/hydrate-tags.ts",
-    "hydrate-daily": "doppler run --project steam-value --config dev -- bun scripts/hydrate-daily.ts"
+    "hydrate-daily": "doppler run --project steam-value --config dev -- bun scripts/hydrate-daily.ts",
+    "steam:browser-sync": "node scripts/sync-steam-status-browser.ts",
+    "steam:browser-login": "node scripts/sync-steam-status-browser.ts --login"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260522.1",
