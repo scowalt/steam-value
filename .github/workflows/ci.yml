@@ -1,4 +1,4 @@
-name: CI and deploy
+name: CI
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'push' && 'production' || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -36,34 +36,3 @@ jobs:
           path: dist
           if-no-files-found: error
           retention-days: 7
-
-  deploy:
-    name: Deploy production
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v3
-      - name: Install deployment dependencies
-        run: bun install --frozen-lockfile
-      - name: Download tested artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: worker-${{ github.sha }}
-          path: dist
-      - name: Deploy tested commit
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: >-
-          bunx wrangler deploy
-          --no-bundle
-          --strict
-          --keep-vars
-          --message "GitHub commit $GITHUB_SHA"
-          --tag "$GITHUB_SHA"

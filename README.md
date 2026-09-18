@@ -90,7 +90,7 @@ Tests use local in-memory SQLite and intercepted browser requests, not productio
 
 ## Build and Deploy
 
-Every pull request runs tests, typechecks, and a production build without production credentials. A successful push to `main` deploys the exact artifact built by that workflow through the `production` GitHub environment. Deployments are serialized and tagged with the commit SHA.
+Every pull request runs tests, typechecks, and a production build in an unprivileged CI workflow. A separate default-branch `workflow_run` workflow receives production credentials only after successful CI on `main`, verifies the tested SHA is still current, and deploys that CI run's exact artifact through the `production` GitHub environment. Deployments are serialized and tagged with the commit SHA.
 
 The environment contains only:
 
