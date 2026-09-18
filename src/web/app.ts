@@ -1,4 +1,8 @@
+import type { DealRefreshStatus, GameDeals } from "../services/deal-types";
+import { activeOffers, escapeHtml, formatDealRefreshStatus, nextDealChange, renderDeals } from "./deal-display";
+
 interface Game {
+  deals: GameDeals;
   id: number;
   steamAppId: number;
   name: string;
@@ -30,6 +34,10 @@ const gamesCards = document.getElementById("games-cards")!;
 const loading = document.getElementById("loading")!;
 const loadMoreBtn = document.getElementById("load-more") as HTMLButtonElement;
 const syncStatus = document.getElementById("sync-status")!;
+const dealStatus = document.getElementById("deal-status")!;
+const gamesError = document.getElementById("games-error")!;
+const emptyMessage = document.getElementById("games-empty")!;
+const onSaleCheckbox = document.getElementById("on-sale") as HTMLInputElement;
 const hideEaCheckbox = document.getElementById("hide-ea") as HTMLInputElement;
 const hidePlayedCheckbox = document.getElementById("hide-played") as HTMLInputElement;
 const hideMMOCheckbox = document.getElementById("hide-mmo") as HTMLInputElement;
@@ -42,6 +50,13 @@ let offset = 0;
 const limit = 100;
 let allLoaded = false;
 let allGames: Game[] = [];
+let gamesRequest: AbortController | null = null;
+let requestVersion = 0;
+let gamesLoadFailed = false;
+let nextExpiry: number | null = null;
+let dealRefreshState: DealRefreshStatus | null = null;
+let dealStatusLoading = false;
+let lastDealStatusAttempt = -Infinity;
 
 interface SyncState {
   lastAttemptAt: number | null;
@@ -57,6 +72,7 @@ interface SyncState {
 
 function getFilterParams(): URLSearchParams {
   const params = new URLSearchParams();
+  if (onSaleCheckbox.checked) params.set("onSale", "true");
   if (hideEaCheckbox.checked) params.set("hideEa", "true");
   if (hidePlayedCheckbox.checked) params.set("hidePlayed", "true");
   if (hideMMOCheckbox.checked) params.set("hideMMO", "true");
@@ -68,41 +84,99 @@ function getFilterParams(): URLSearchParams {
 }
 
 async function loadGames() {
-  if (allLoaded) return;
+  if (allLoaded || gamesRequest) return;
 
+  const request = new AbortController();
+  gamesRequest = request;
+  const version = ++requestVersion;
   loadMoreBtn.disabled = true;
   loading.style.display = "block";
+  gamesError.hidden = true;
+  emptyMessage.hidden = true;
+  gamesLoadFailed = false;
 
   const params = getFilterParams();
   params.set("limit", limit.toString());
   params.set("offset", offset.toString());
 
-  const res = await fetch(`/api/games?${params.toString()}`);
-  const games = (await res.json()) as Game[];
+  try {
+    const res = await fetch(`/api/games?${params.toString()}`, { signal: request.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const games = (await res.json()) as Game[];
+    if (!Array.isArray(games)) throw new Error("Invalid games response");
+    // Aborting alone is insufficient when an earlier response is already being decoded.
+    if (version !== requestVersion) return;
 
-  if (games.length < limit) {
-    allLoaded = true;
-    loadMoreBtn.style.display = "none";
-  } else {
+    allLoaded = games.length < limit;
+    loadMoreBtn.style.display = allLoaded ? "none" : "block";
+    loadMoreBtn.textContent = "Load More";
+    allGames = allGames.concat(games);
+    offset += games.length;
+    updateNextExpiry();
+    renderGames();
+  } catch {
+    if (version !== requestVersion) return;
+    gamesLoadFailed = true;
+    gamesError.textContent = "Could not load games. Check your connection and retry.";
+    gamesError.hidden = false;
+    loadMoreBtn.textContent = "Retry loading";
     loadMoreBtn.style.display = "block";
+  } finally {
+    if (version === requestVersion) {
+      gamesRequest = null;
+      loading.style.display = "none";
+      loadMoreBtn.disabled = false;
+      renderEmptyState();
+    }
   }
-
-  allGames = allGames.concat(games);
-  offset += games.length;
-  loading.style.display = "none";
-  loadMoreBtn.disabled = false;
-
-  renderGames();
 }
 
 function resetAndLoad() {
-  // Reset state when filters change
+  // Invalidate both in-flight pages and filter responses before starting the new ranking.
+  requestVersion++;
+  gamesRequest?.abort();
+  gamesRequest = null;
   tbody.innerHTML = "";
   gamesCards.innerHTML = "";
   offset = 0;
   allLoaded = false;
   allGames = [];
-  loadGames();
+  nextExpiry = null;
+  void loadGames();
+}
+
+function visibleGames(now: number): Game[] {
+  // The server filters BEFORE pagination. This only removes offers that expired in this tab.
+  return onSaleCheckbox.checked ? allGames.filter((game) => activeOffers(game.deals, now).length > 0) : allGames;
+}
+
+function renderEmptyState() {
+  emptyMessage.hidden = Boolean(gamesRequest) || gamesLoadFailed || visibleGames(Date.now() / 1000).length > 0;
+  emptyMessage.textContent = onSaleCheckbox.checked
+    ? "No games with current discounts or bundles match these filters. Missing, stale or unmatched sale data does not qualify; try disabling On sale."
+    : "No games match these filters.";
+}
+
+function updateNextExpiry() {
+  const now = Date.now() / 1000;
+  const deadlines = allGames.map((game) => nextDealChange(game.deals, now))
+    .filter((deadline): deadline is number => deadline !== null);
+  nextExpiry = deadlines.length ? Math.min(...deadlines) : null;
+}
+
+function checkDealExpiry() {
+  void loadDealState();
+  dealStatus.textContent = formatDealRefreshStatus(dealRefreshState, Date.now() / 1000);
+  if (nextExpiry === null || nextExpiry > Date.now() / 1000) return;
+  updateNextExpiry();
+  if (onSaleCheckbox.checked) {
+    // Restart server pagination because expiry can change membership anywhere in the ranking.
+    resetAndLoad();
+  } else {
+    renderGames();
+    renderEmptyState();
+  }
+  void loadDealState();
 }
 
 function renderGames() {
@@ -111,7 +185,9 @@ function renderGames() {
   const tableFragment = document.createDocumentFragment();
   const cardsFragment = document.createDocumentFragment();
 
-  allGames.forEach((game, i) => {
+  const now = Date.now() / 1000;
+  visibleGames(now).forEach((game, i) => {
+    const dealsHtml = renderDeals(game.deals, now);
     const rank = i + 1;
     const tr = document.createElement("tr");
 
@@ -143,10 +219,11 @@ function renderGames() {
       <td class="wishlist">${game.isOnWishlist ? '<span class="wishlist-check">✓</span>' : ''}</td>
       <td class="owned">${game.isOwned ? '<span class="owned-check">✓</span>' : ''}</td>
       <td class="rank">${rank}</td>
-      <td>
-        <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank">
+      <td class="game-name">
+        <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
           ${escapeHtml(game.name)}
         </a>
+        ${dealsHtml}
       </td>
       <td class="score">${game.valueScore?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "N/A"}</td>
       <td class="reviews">
@@ -203,6 +280,7 @@ function renderGames() {
         </div>
       </dl>
       <div class="game-card-tags">${tags.length > 0 ? tags.join("") : '<span class="game-tag">Mode and controller unknown</span>'}</div>
+      ${dealsHtml}
     `;
     cardsFragment.appendChild(card);
   });
@@ -211,10 +289,21 @@ function renderGames() {
   gamesCards.appendChild(cardsFragment);
 }
 
-function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+async function loadDealState() {
+  // Visibility/expiry checks can coincide; don't hammer a failed or empty status endpoint.
+  if (dealStatusLoading || Date.now() - lastDealStatusAttempt < 60_000) return;
+  dealStatusLoading = true;
+  lastDealStatusAttempt = Date.now();
+  try {
+    const res = await fetch("/api/deal-state");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    dealRefreshState = (await res.json()) as DealRefreshStatus | null;
+  } catch {
+    dealRefreshState = null;
+  } finally {
+    dealStatusLoading = false;
+    dealStatus.textContent = formatDealRefreshStatus(dealRefreshState, Date.now() / 1000);
+  }
 }
 
 async function loadSyncState() {
@@ -258,6 +347,7 @@ function formatUnixTime(value: number): string {
 }
 
 loadMoreBtn.addEventListener("click", loadGames);
+onSaleCheckbox.addEventListener("change", resetAndLoad);
 hideEaCheckbox.addEventListener("change", resetAndLoad);
 hidePlayedCheckbox.addEventListener("change", resetAndLoad);
 hideMMOCheckbox.addEventListener("change", resetAndLoad);
@@ -265,5 +355,15 @@ hideIgnoredCheckbox.addEventListener("change", resetAndLoad);
 singleOnlyCheckbox.addEventListener("change", resetAndLoad);
 coopFilter.addEventListener("change", resetAndLoad);
 controllerFilter.addEventListener("change", resetAndLoad);
-loadGames();
-loadSyncState();
+document.querySelector(".filters")!.addEventListener("submit", (event) => event.preventDefault());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    checkDealExpiry();
+    void loadDealState();
+  }
+});
+// Background tabs may throttle timers; visibilitychange also checks before showing old offers.
+setInterval(checkDealExpiry, 30_000);
+void loadGames();
+void loadSyncState();
+void loadDealState();

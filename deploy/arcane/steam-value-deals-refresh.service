@@ -1,0 +1,12 @@
+[Unit]
+Description=Steam Value IsThereAnyDeal offer refresh
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/services/steam-value
+EnvironmentFile=%h/.config/steam-value/deals.env
+ExecStart=%h/.bun/bin/bun scripts/refresh-deals.ts
+TimeoutStartSec=45min
+Nice=10

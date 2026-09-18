@@ -27,3 +27,25 @@ journalctl --user -u steam-value-status-sync.service -n 100 --no-pager
 ```
 
 If Steam authentication expires, the refresh fails before database writes. Repeat the one-time login; do not weaken or bypass the count guards.
+
+## IsThereAnyDeal offer refresh
+
+Independent of the above browser and the long-running catalog import:
+
+- `steam-value-deals-refresh.service`: Bun refresh of US/USD retail discounts and active bundles for ranked games.
+- `steam-value-deals-refresh.timer`: hourly, persistent catch-up after reboot, with up to five minutes of jitter.
+- `%h/.config/steam-value/deals.env`: mode `0600`, contains only `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `ITAD_API_KEY` mirrored from Doppler `steam-value/dev`.
+
+Register an app at https://isthereanydeal.com/apps/my/ and keep the key in Doppler; never add it to the Worker, browser assets, command-line arguments or git. The job has no Steam cookie/browser access.
+
+Deploy only the new script (`scripts/refresh-deals.ts`) and its four service modules (`deal-types.ts`, `game-deals.ts`, `deal-refresh.ts`, `itad-client.ts`) under `src/services/`; do not replace a checkout while its catalog import is running. Install the two `steam-value-deals-refresh.*` unit files under `~/.config/systemd/user/`, provision the environment file securely, then:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user start steam-value-deals-refresh.service
+systemctl --user enable --now steam-value-deals-refresh.timer
+systemctl --user status steam-value-deals-refresh.timer
+journalctl --user -u steam-value-deals-refresh.service -n 50 --no-pager
+```
+
+The refresh uses a renewable, token-fenced Turso lease. Failed runs exit nonzero; the next hourly run retries. Check `GET /api/deal-state` for failure/freshness/coverage. Each source snapshot expires after 24 hours, with earlier known offer expirations enforced by both API and UI. A missing retail response leaves that source unknown/stale, even when current bundle coverage is available. Source mappings are rechecked weekly, including unmatched games. This job never changes the `games` table or the catalog checkpoint, and does not recalculate rankings.

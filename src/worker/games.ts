@@ -1,6 +1,8 @@
 import type { Client, InValue } from "@libsql/client/web";
+import { getGameDeals, ON_SALE_SQL, onSaleArgs, unixNow, type GameDeals } from "../services/game-deals";
 
 export interface GameDto {
+  deals: GameDeals;
   id: number;
   steamAppId: number;
   name: string;
@@ -48,6 +50,7 @@ export interface CityBuilderGameDto {
 }
 
 export interface GameQueryParams {
+  onSale: boolean;
   limit: number;
   offset: number;
   hideEa: boolean;
@@ -61,6 +64,7 @@ export interface GameQueryParams {
 
 export function parseGameQuery(url: URL): GameQueryParams {
   return {
+    onSale: url.searchParams.get("onSale") === "true",
     limit: clampInteger(url.searchParams.get("limit"), 100, 1, 500),
     offset: clampInteger(url.searchParams.get("offset"), 0, 0, 100_000),
     hideEa: url.searchParams.get("hideEa") === "true",
@@ -73,9 +77,13 @@ export function parseGameQuery(url: URL): GameQueryParams {
   };
 }
 
-export async function listGames(client: Client, params: GameQueryParams): Promise<GameDto[]> {
+export async function listGames(client: Client, params: GameQueryParams, now = unixNow()): Promise<GameDto[]> {
   const conditions = ["value_score IS NOT NULL", "is_endless = 0"];
   const args: InValue[] = [];
+  if (params.onSale) {
+    conditions.push(ON_SALE_SQL);
+    args.push(...onSaleArgs(now));
+  }
 
   if (params.hideEa) conditions.push("is_early_access = 0");
   if (params.hidePlayed) conditions.push("(playtime_minutes = 0 OR playtime_minutes IS NULL)");
@@ -145,7 +153,8 @@ export async function listGames(client: Client, params: GameQueryParams): Promis
     args,
   });
 
-  return result.rows.map(mapGameRow);
+  const deals = await getGameDeals(client, result.rows.map((row) => Number(row.steam_app_id)), now);
+  return result.rows.map((row) => ({ ...mapGameRow(row), deals: deals.get(Number(row.steam_app_id))! }));
 }
 
 export async function listCityBuilderGames(client: Client): Promise<CityBuilderGameDto[]> {
@@ -196,7 +205,7 @@ export async function listCityBuilderGames(client: Client): Promise<CityBuilderG
   return games;
 }
 
-function mapGameRow(row: Record<string, unknown>): GameDto {
+function mapGameRow(row: Record<string, unknown>): Omit<GameDto, "deals"> {
   return {
     id: Number(row.id),
     steamAppId: Number(row.steam_app_id),

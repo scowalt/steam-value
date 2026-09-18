@@ -5,6 +5,7 @@
  */
 import { createClient } from "@libsql/client";
 import { ensureSyncStateTable } from "../src/services/steam-status-sync";
+import { ensureDealTables } from "../src/services/game-deals";
 
 const client = createClient({
   url: process.env.TURSO_DATABASE_URL!,
@@ -12,6 +13,7 @@ const client = createClient({
 });
 
 await ensureSyncStateTable(client);
+await ensureDealTables(client);
 
 await client.batch(
   [

@@ -31,7 +31,7 @@
       gap: 1.5rem;
       margin-bottom: 1.5rem;
     }
-    .title-block { flex: 0 0 auto; }
+    .title-block { flex: 0 1 20rem; }
     #sync-status {
       display: block;
       max-width: 32rem;
@@ -47,7 +47,7 @@
     }
     .filters {
       display: grid;
-      grid-template-columns: repeat(7, minmax(max-content, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(9.75rem, 1fr));
       gap: 0.5rem;
     }
     .filters label {
@@ -85,6 +85,40 @@
       border-radius: 4px;
       font-size: 0.9rem;
     }
+    .sale-explanation, .deal-info {
+      color: #a8b5c1;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .sale-explanation { margin-top: 0.65rem; }
+    .deal-info {
+      margin-bottom: 1rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid #2a475e;
+      border-radius: 6px;
+      background: #16202d;
+    }
+    .deal-info a, .game-deals a { color: #66c0f4; text-decoration: underline; }
+    #deal-status { display: block; margin-top: 0.35rem; }
+    .game-name { min-width: 18rem; max-width: 30rem; }
+    .game-deals { margin-top: 0.65rem; font-size: 0.78rem; line-height: 1.45; overflow-wrap: anywhere; }
+    .game-card > .game-deals { margin: 0; padding: 0.8rem 0.9rem; border-top: 1px solid #2a475e; }
+    .deal-group + .deal-group { margin-top: 0.6rem; }
+    .deal-group h3 { font-size: 0.72rem; color: #a8b5c1; font-weight: 500; }
+    .deal-offer { margin-top: 0.3rem; }
+    .deal-heading { font-weight: 600; }
+    .deal-provider { font-weight: 400; }
+    .deal-price { color: #b8df69; }
+    .deal-condition, .deal-state { color: #a8b5c1; }
+    .deal-voucher { color: #f1c77b; }
+    .deal-state { margin-top: 0.4rem; }
+    .game-deals details { margin-top: 0.3rem; }
+    .game-deals summary { cursor: pointer; padding: 0.5rem 0; color: #66c0f4; }
+    .game-deals details .deal-offer { padding: 0.5rem 0; border-top: 1px solid #2a475e; }
+    a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px solid #66c0f4; outline-offset: 3px; }
+    #games-empty, #games-error { text-align: center; padding: 1rem; line-height: 1.5; }
+    #games-error { color: #f1c77b; }
     .table-shell {
       width: 100%;
       overflow-x: auto;
@@ -109,6 +143,7 @@
       top: 0;
     }
     tr:hover { background: #1e3a52; }
+    td { vertical-align: top; }
     td.rank { color: #8f98a0; width: 60px; }
     td.score { color: #a1cd44; font-weight: 600; }
     td.reviews { color: #66c0f4; }
@@ -244,6 +279,7 @@
     }
     @media (max-width: 1500px) {
       .header { flex-direction: column; }
+      .title-block { flex-basis: auto; }
       .header-controls { width: 100%; }
       .filters { grid-template-columns: repeat(auto-fit, minmax(9.75rem, 1fr)); }
       .filters .select-filter {
@@ -277,6 +313,9 @@
       <div class="header-controls">
         <form class="filters" aria-label="Filter games">
           <label>
+            <input type="checkbox" id="on-sale" aria-describedby="sale-explanation"> On sale
+          </label>
+          <label>
             <input type="checkbox" id="hide-ea"> Hide Early Access
           </label>
           <label>
@@ -309,8 +348,13 @@
             </select>
           </label>
         </form>
+        <p id="sale-explanation" class="sale-explanation">On sale includes discounted retail offers across Steam and other stores, plus bundle opportunities (including choice/add-on bundles). US/USD; activation may not be Steam. Combined with all other filters before pagination.</p>
       </div>
     </header>
+    <aside class="deal-info" aria-label="Sale data and freshness">
+      <p>Sale and bundle data from <a href="https://isthereanydeal.com/" target="_blank" rel="noopener noreferrer">IsThereAnyDeal</a>. Cached for at most 24 hours; offers are removed earlier at a known expiry. Unknown end times do not guarantee availability. Confirm price, activation, voucher and bundle requirements at the provider. Bundle prices are tier totals, never per-game prices.</p>
+      <span id="deal-status" role="status" aria-live="polite">Loading sale refresh status…</span>
+    </aside>
     <div class="table-shell" role="region" aria-label="Ranked games table" tabindex="0">
       <table>
         <thead>
@@ -332,7 +376,9 @@
       </table>
     </div>
     <section id="games-cards" class="games-cards" aria-label="Ranked games"></section>
-    <div id="loading">Loading...</div>
+    <p id="games-empty" role="status" hidden></p>
+    <p id="games-error" role="alert" hidden></p>
+    <div id="loading" role="status">Loading...</div>
     <button id="load-more" style="display: none;">Load More</button>
   </main>
   <script type="module" src="/app.js"></script>

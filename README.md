@@ -15,6 +15,7 @@ High-rated, shorter games rank higher than mediocre, long ones. The formula is c
 ## Data Sources
 
 - **Steam API** — reviews, app details, ownership, wishlist, ignored list
+- **IsThereAnyDeal** — US/USD discounts across supported stores and active bundles
 - **HowLongToBeat** — completion times (manual/batch enrichment)
 - **Wikidata** — Steam ID to HLTB ID mappings
 - **SteamDB dataset** — local lookup for fast mapping
@@ -65,12 +66,26 @@ Browse and filter your game library through the Cloudflare Worker:
 - Filter by co-op mode (any, online, local) and controller support
 - Links directly to Steam Store pages
 - Shows last Steam Status refresh metadata
+- **On sale** includes fresh retail discounts and active bundle opportunities from IsThereAnyDeal, combined with all existing filters before pagination
+- Shows stores, activation/DRM when reported, required vouchers, and original purchase links; non-Steam copies are explicitly possible
+- Bundle prices are **reported tier totals**, never individual-game prices; choice/add-on/unknown-price bundles link to provider details instead
+- Offers are usable for **24 hours after fetching**, or until an earlier known expiry. Unknown expiry is not a guarantee of checkout availability. Missing or failed responses do not extend freshness; partial/unknown data is labeled
 
 Local web development uses Wrangler/Miniflare, not the old Bun server:
 
 ```bash
 bun web
 ```
+
+## Tests
+
+```bash
+bunx playwright install chromium  # one-time browser setup
+bun test
+bun run typecheck
+```
+
+Tests use local in-memory SQLite and intercepted browser requests, not production APIs or credentials. Desktop/mobile checks do not start a development server.
 
 ## Build and Deploy
 
@@ -114,6 +129,7 @@ bun db:studio           # Open Drizzle Studio
 | `bun list` | List all games with scores |
 | `bun recalc` | Recalculate all value scores |
 | `bun run catalog:refresh` | Upsert Steam catalog rows and refresh review scores/counts |
+| `bun run deals:refresh` | Refresh US/USD retail discounts and bundles for ranked games via IsThereAnyDeal |
 | `bun web` | Build and run the Worker locally through Wrangler/Miniflare |
 | `bun run build` | Build static assets and Worker bundle into `dist/` |
 | `bun run secrets:dev` | Write selected Doppler secrets to `.dev.vars` for local Worker dev |
@@ -124,6 +140,23 @@ bun db:studio           # Open Drizzle Studio
 | `bun run steam:browser-sync` | Run the guarded browser-backed Steam Status refresh |
 
 Hydration scripts in `scripts/` bulk-fetch Catalog Facts from Steam, SteamSpy, Wikidata, and HLTB. They remain external/admin jobs and write directly to Turso.
+
+### IsThereAnyDeal offers
+
+Offers are independent Catalog Facts, not Steam Status or a component of Value Score. An hourly job on arcane refreshes only rankable games using exact Steam app-ID mapping (cached for seven days), batches of up to 200 ITAD game IDs, and a complete active-bundle feed. It uses throttling, bounded retries honoring `Retry-After`, and a renewable database lease to prevent overlapping publication. No ITAD requests run in the Worker or browser.
+
+`game_deal_cache` stores separate retail/bundle snapshots so missing retail responses cannot silently become a fresh “no offers” result. `itad_game_map` and `deal_refresh_state` track identity and operational status. `bun run db:setup-worker` creates these tables additively; run it before deploying the updated Worker. The hourly service also ensures its own tables exist. No game-table migration is required.
+
+```bash
+bun run deals:refresh --limit 20  # bounded live verification
+bun run deals:refresh             # all currently ranked games
+```
+
+`GET /api/games?onSale=true` applies sale filtering before pagination; each game includes offer kind, freshness, price and conditions. `GET /api/deal-state` reports last attempt/success, errors, running state and complete fresh coverage. Successful no-offer responses replace disappeared offers; failed/missing responses retain prior data only until its original deadline. An open browser tab also expires displayed offers.
+
+Price data is provided by [IsThereAnyDeal](https://isthereanydeal.com/); original affiliate links and voucher requirements are preserved. Private personal use is explicitly allowed by the current API documentation (the linked repository terms differ; see [API research](docs/research/isthereanydeal-sale-data.md)). Bundle choice/add-on rules are not fully specified by the API, so inspect provider terms before buying. This is not an affiliated ITAD product or an availability guarantee.
+
+See `deploy/arcane/README.md` for the independent offer service/timer and credential setup.
 
 ### Steam catalog refresh
 
@@ -164,8 +197,11 @@ Managed via Doppler (`steam-value` project):
 | `TURSO_AUTH_TOKEN` | Turso auth token |
 | `STEAM_API_KEY` | Steam Web API key (for owned games) |
 | `STEAM_ID` | Your Steam profile ID |
+| `ITAD_API_KEY` | IsThereAnyDeal API key for the external offer refresh only |
 
 The primary Steam Status path does not export `steamLoginSecure`. Its HttpOnly cookie stays inside the dedicated Steel browser profile on arcane. The arcane deployment receives only `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `STEAM_API_KEY`, and `STEAM_ID`; see `deploy/arcane/README.md`.
+
+`ITAD_API_KEY` remains in Doppler and arcane's private `deals.env`; it is **not** a Worker secret and is never bundled into frontend assets.
 
 For local Worker dev, run `bun run secrets:dev`. For Cloudflare runtime, run `doppler run --project mission-control --config dev -- bun run secrets:sync` so Wrangler has a Cloudflare API token. Secrets are intentionally kept out of OpenTofu state.
 

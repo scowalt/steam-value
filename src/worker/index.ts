@@ -1,5 +1,6 @@
 import { createClient, type Client } from "@libsql/client/web";
 import { getSyncState } from "../services/steam-status-sync";
+import { getDealRefreshStatus } from "../services/game-deals";
 import { listCityBuilderGames, listGames, parseGameQuery } from "./games";
 
 interface Env {
@@ -38,6 +39,10 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/city-builders") {
     const games = await listCityBuilderGames(client);
     return json(games);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/deal-state") {
+    return json(await getDealRefreshStatus(client));
   }
 
   if (request.method === "GET" && url.pathname === "/api/sync-state") {

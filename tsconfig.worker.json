@@ -5,5 +5,6 @@
     "types": ["@cloudflare/workers-types"],
     "noEmit": true
   },
-  "include": ["src/worker/**/*.ts", "src/services/steam-status-sync.ts"]
+  "include": ["src/worker/**/*.ts", "src/services/steam-status-sync.ts"],
+  "exclude": ["src/worker/**/*.test.ts"]
 }
