@@ -28,7 +28,8 @@ The always-on web surface runs as a **Cloudflare Worker with Static Assets** at 
 - **Steel on arcane**: keeps a persistent, tailnet-only Steam browser profile and runs the daily Steam Status refresh.
 - **Turso**: remains the production SQLite database for both the Worker and admin scripts.
 - **Doppler**: remains the source of truth for database and Steam API secrets. Only Turso secrets are mirrored to the Worker.
-- **Mission-control OpenTofu**: owns the Worker script/assets, custom domain, disabled workers.dev subdomain, and Cloudflare Access application.
+- **GitHub Actions**: tests and builds every pull request; tested `main` artifacts deploy the Worker script/assets.
+- **Mission-control OpenTofu**: owns the custom domain, disabled workers.dev/preview endpoints, empty cron schedule, and Cloudflare Access application.
 
 Operational boundaries:
 
@@ -89,27 +90,26 @@ Tests use local in-memory SQLite and intercepted browser requests, not productio
 
 ## Build and Deploy
 
-Build the Worker bundle and static assets:
+Every pull request runs tests, typechecks, and a production build in an unprivileged CI workflow. A separate default-branch `workflow_run` workflow receives production credentials only after successful CI on `main`, verifies the tested SHA is still current, and deploys that CI run's exact artifact through the `production` GitHub environment. Deployments are serialized and tagged with the commit SHA.
+
+The environment contains only:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_API_TOKEN`, with Cloudflare Worker **Editor** access scoped to the existing `steam-value` Worker
+
+The token does not need DNS, Access, R2, Turso, custom-domain, or Worker-creation permission. `wrangler.toml` owns Worker code/assets and runtime settings. Mission-control OpenTofu separately owns the custom domain, Access, disabled workers.dev/preview endpoints, and cron infrastructure; see [ADR 0003](docs/adr/0003-deploy-worker-application-through-github-actions.md).
+
+For local verification only:
 
 ```bash
+bun install --frozen-lockfile
+bunx playwright install chromium
+bun test
 bun run build
+bunx wrangler deploy --dry-run --no-bundle --strict --keep-vars
 ```
 
-Sync Worker secrets from Doppler to Cloudflare. In non-interactive shells, run it with the mission-control Cloudflare API token in the environment:
-
-```bash
-doppler run --project mission-control --config dev -- bun run secrets:sync
-```
-
-Apply Cloudflare infrastructure from mission-control:
-
-```bash
-cd /home/scowalt/Code/opentofu
-doppler run --project mission-control --config dev -- tofu plan
-doppler run --project mission-control --config dev -- tofu apply
-```
-
-The OpenTofu config reads built artifacts from `steam-value/dist`, so run `bun run build` before planning/applying Worker changes.
+Do not deploy pull-request artifacts manually. For an emergency rollback, an operator with the same Worker-scoped credential can inspect version history and run `bunx wrangler rollback`. Then revert the offending commit on `main` so the next green deployment restores source/production agreement. Worker secrets are preserved by deploys and continue to be synced separately from Doppler when intentionally changed.
 
 ## Database
 
