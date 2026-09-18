@@ -66,10 +66,10 @@ Browse and filter your game library through the Cloudflare Worker:
 - Filter by co-op mode (any, online, local) and controller support
 - Links directly to Steam Store pages
 - Shows last Steam Status refresh metadata
-- **On sale** includes fresh retail discounts and active bundle opportunities from IsThereAnyDeal, combined with all existing filters before pagination
-- Shows stores, activation/DRM when reported, required vouchers, and original purchase links; non-Steam copies are explicitly possible
-- Bundle prices are **reported tier totals**, never individual-game prices; choice/add-on/unknown-price bundles link to provider details instead
-- Offers are usable for **24 hours after fetching**, or until an earlier known expiry. Unknown expiry is not a guarantee of checkout availability. Missing or failed responses do not extend freshness; partial/unknown data is labeled
+- **On sale or in bundle** includes fresh retail discounts and active bundle opportunities from IsThereAnyDeal, combined with all existing filters before pagination
+- A dedicated **Deals** column (compact labeled field on mobile) shows the best-price retail offer's **% off**, **In bundle**, or both, linked to the original offers. A dash means no current offer can be shown, not proof that no sale exists
+- Check linked providers for price, activation/DRM, voucher and bundle choice/add-on requirements; non-Steam copies are possible. Bundle badges do not imply an individual-game price
+- Offers are usable for **24 hours after fetching**, or until an earlier known expiry. Unknown expiry is not a guarantee of checkout availability. Missing or failed responses do not extend freshness; the UI expires badges without displaying a refresh-status panel
 
 Local web development uses Wrangler/Miniflare, not the old Bun server:
 
@@ -154,7 +154,7 @@ bun run deals:refresh             # all currently ranked games
 
 `GET /api/games?onSale=true` applies sale filtering before pagination; each game includes offer kind, freshness, price and conditions. `GET /api/deal-state` reports last attempt/success, errors, running state and complete fresh coverage. Successful no-offer responses replace disappeared offers; failed/missing responses retain prior data only until its original deadline. An open browser tab also expires displayed offers.
 
-Price data is provided by [IsThereAnyDeal](https://isthereanydeal.com/); original affiliate links and voucher requirements are preserved. Private personal use is explicitly allowed by the current API documentation (the linked repository terms differ; see [API research](docs/research/isthereanydeal-sale-data.md)). Bundle choice/add-on rules are not fully specified by the API, so inspect provider terms before buying. This is not an affiliated ITAD product or an availability guarantee.
+Price data is provided by [IsThereAnyDeal](https://isthereanydeal.com/); original affiliate links are preserved, and voucher requirements remain in the offer API data. The UI shows only compact linked badges and footer attribution. Private personal use is explicitly allowed by the current API documentation (the linked repository terms differ; see [API research](docs/research/isthereanydeal-sale-data.md)). Bundle choice/add-on rules are not fully specified by the API, so inspect provider terms before buying. This is not an affiliated ITAD product or an availability guarantee.
 
 See `deploy/arcane/README.md` for the independent offer service/timer and credential setup.
 

@@ -1,5 +1,5 @@
-import type { DealRefreshStatus, GameDeals } from "../services/deal-types";
-import { activeOffers, escapeHtml, formatDealRefreshStatus, nextDealChange, renderDeals } from "./deal-display";
+import type { GameDeals } from "../services/deal-types";
+import { activeOffers, escapeHtml, nextDealChange, renderDeals } from "./deal-display";
 
 interface Game {
   deals: GameDeals;
@@ -34,7 +34,6 @@ const gamesCards = document.getElementById("games-cards")!;
 const loading = document.getElementById("loading")!;
 const loadMoreBtn = document.getElementById("load-more") as HTMLButtonElement;
 const syncStatus = document.getElementById("sync-status")!;
-const dealStatus = document.getElementById("deal-status")!;
 const gamesError = document.getElementById("games-error")!;
 const emptyMessage = document.getElementById("games-empty")!;
 const onSaleCheckbox = document.getElementById("on-sale") as HTMLInputElement;
@@ -54,9 +53,6 @@ let gamesRequest: AbortController | null = null;
 let requestVersion = 0;
 let gamesLoadFailed = false;
 let nextExpiry: number | null = null;
-let dealRefreshState: DealRefreshStatus | null = null;
-let dealStatusLoading = false;
-let lastDealStatusAttempt = -Infinity;
 
 interface SyncState {
   lastAttemptAt: number | null;
@@ -153,7 +149,7 @@ function visibleGames(now: number): Game[] {
 function renderEmptyState() {
   emptyMessage.hidden = Boolean(gamesRequest) || gamesLoadFailed || visibleGames(Date.now() / 1000).length > 0;
   emptyMessage.textContent = onSaleCheckbox.checked
-    ? "No games with current discounts or bundles match these filters. Missing, stale or unmatched sale data does not qualify; try disabling On sale."
+    ? "No games with current discounts or bundles match these filters. Missing, stale or unmatched sale data does not qualify; try disabling On sale or in bundle."
     : "No games match these filters.";
 }
 
@@ -165,8 +161,6 @@ function updateNextExpiry() {
 }
 
 function checkDealExpiry() {
-  void loadDealState();
-  dealStatus.textContent = formatDealRefreshStatus(dealRefreshState, Date.now() / 1000);
   if (nextExpiry === null || nextExpiry > Date.now() / 1000) return;
   updateNextExpiry();
   if (onSaleCheckbox.checked) {
@@ -176,7 +170,6 @@ function checkDealExpiry() {
     renderGames();
     renderEmptyState();
   }
-  void loadDealState();
 }
 
 function renderGames() {
@@ -223,8 +216,8 @@ function renderGames() {
         <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
           ${escapeHtml(game.name)}
         </a>
-        ${dealsHtml}
       </td>
+      <td class="deals">${dealsHtml}</td>
       <td class="score">${game.valueScore?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "N/A"}</td>
       <td class="reviews">
         <span class="review-pct">${game.steamReviewScore}%</span>
@@ -279,31 +272,17 @@ function renderGames() {
           <dd>${playtimeHtml}</dd>
         </div>
       </dl>
+      <dl class="game-card-deals">
+        <dt>Deals</dt>
+        <dd>${dealsHtml}</dd>
+      </dl>
       <div class="game-card-tags">${tags.length > 0 ? tags.join("") : '<span class="game-tag">Mode and controller unknown</span>'}</div>
-      ${dealsHtml}
     `;
     cardsFragment.appendChild(card);
   });
 
   tbody.appendChild(tableFragment);
   gamesCards.appendChild(cardsFragment);
-}
-
-async function loadDealState() {
-  // Visibility/expiry checks can coincide; don't hammer a failed or empty status endpoint.
-  if (dealStatusLoading || Date.now() - lastDealStatusAttempt < 60_000) return;
-  dealStatusLoading = true;
-  lastDealStatusAttempt = Date.now();
-  try {
-    const res = await fetch("/api/deal-state");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    dealRefreshState = (await res.json()) as DealRefreshStatus | null;
-  } catch {
-    dealRefreshState = null;
-  } finally {
-    dealStatusLoading = false;
-    dealStatus.textContent = formatDealRefreshStatus(dealRefreshState, Date.now() / 1000);
-  }
 }
 
 async function loadSyncState() {
@@ -359,11 +338,9 @@ document.querySelector(".filters")!.addEventListener("submit", (event) => event.
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     checkDealExpiry();
-    void loadDealState();
   }
 });
 // Background tabs may throttle timers; visibilitychange also checks before showing old offers.
 setInterval(checkDealExpiry, 30_000);
 void loadGames();
 void loadSyncState();
-void loadDealState();

@@ -85,38 +85,17 @@
       border-radius: 4px;
       font-size: 0.9rem;
     }
-    .sale-explanation, .deal-info {
-      color: #a8b5c1;
-      font-size: 0.8rem;
-      line-height: 1.5;
-      overflow-wrap: anywhere;
-    }
-    .sale-explanation { margin-top: 0.65rem; }
-    .deal-info {
-      margin-bottom: 1rem;
-      padding: 0.75rem 1rem;
-      border: 1px solid #2a475e;
-      border-radius: 6px;
-      background: #16202d;
-    }
-    .deal-info a, .game-deals a { color: #66c0f4; text-decoration: underline; }
-    #deal-status { display: block; margin-top: 0.35rem; }
+    .deal-attribution { margin-top: 1rem; color: #8f98a0; font-size: 0.75rem; }
+    .deal-attribution a { color: #66c0f4; text-decoration: underline; }
     .game-name { min-width: 18rem; max-width: 30rem; }
-    .game-deals { margin-top: 0.65rem; font-size: 0.78rem; line-height: 1.45; overflow-wrap: anywhere; }
-    .game-card > .game-deals { margin: 0; padding: 0.8rem 0.9rem; border-top: 1px solid #2a475e; }
-    .deal-group + .deal-group { margin-top: 0.6rem; }
-    .deal-group h3 { font-size: 0.72rem; color: #a8b5c1; font-weight: 500; }
-    .deal-offer { margin-top: 0.3rem; }
-    .deal-heading { font-weight: 600; }
-    .deal-provider { font-weight: 400; }
-    .deal-price { color: #b8df69; }
-    .deal-condition, .deal-state { color: #a8b5c1; }
-    .deal-voucher { color: #f1c77b; }
-    .deal-state { margin-top: 0.4rem; }
-    .game-deals details { margin-top: 0.3rem; }
-    .game-deals summary { cursor: pointer; padding: 0.5rem 0; color: #66c0f4; }
-    .game-deals details .deal-offer { padding: 0.5rem 0; border-top: 1px solid #2a475e; }
-    a:focus-visible, summary:focus-visible, button:focus-visible { outline: 2px solid #66c0f4; outline-offset: 3px; }
+    .game-deals { display: flex; flex-wrap: wrap; gap: 0.35rem; color: #8f98a0; font-size: 0.78rem; line-height: 1.45; }
+    td.deals { min-width: 8rem; }
+    .deal-badge { padding: 0.2rem 0.4rem; border-radius: 4px; background: #1b2838; white-space: nowrap; }
+    .deal-badge a { display: inline-block; color: #b8df69; text-decoration: underline; }
+    .game-card-deals { display: flex; align-items: baseline; gap: 0.75rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid #2a475e; }
+    .game-card-deals dt { color: #8f98a0; font-size: 0.68rem; text-transform: uppercase; }
+    .game-card-deals dd { min-width: 0; }
+    a:focus-visible, button:focus-visible { outline: 2px solid #66c0f4; outline-offset: 3px; }
     #games-empty, #games-error { text-align: center; padding: 1rem; line-height: 1.5; }
     #games-error { color: #f1c77b; }
     .table-shell {
@@ -313,7 +292,7 @@
       <div class="header-controls">
         <form class="filters" aria-label="Filter games">
           <label>
-            <input type="checkbox" id="on-sale" aria-describedby="sale-explanation"> On sale
+            <input type="checkbox" id="on-sale"> On sale or in bundle
           </label>
           <label>
             <input type="checkbox" id="hide-ea"> Hide Early Access
@@ -348,13 +327,8 @@
             </select>
           </label>
         </form>
-        <p id="sale-explanation" class="sale-explanation">On sale includes discounted retail offers across Steam and other stores, plus bundle opportunities (including choice/add-on bundles). US/USD; activation may not be Steam. Combined with all other filters before pagination.</p>
       </div>
     </header>
-    <aside class="deal-info" aria-label="Sale data and freshness">
-      <p>Sale and bundle data from <a href="https://isthereanydeal.com/" target="_blank" rel="noopener noreferrer">IsThereAnyDeal</a>. Cached for at most 24 hours; offers are removed earlier at a known expiry. Unknown end times do not guarantee availability. Confirm price, activation, voucher and bundle requirements at the provider. Bundle prices are tier totals, never per-game prices.</p>
-      <span id="deal-status" role="status" aria-live="polite">Loading sale refresh status…</span>
-    </aside>
     <div class="table-shell" role="region" aria-label="Ranked games table" tabindex="0">
       <table>
         <thead>
@@ -363,6 +337,7 @@
             <th title="Owned">Own</th>
             <th>#</th>
             <th>Game</th>
+            <th>Deals</th>
             <th>Score</th>
             <th>Reviews</th>
             <th title="How Long to Beat">HLTB</th>
@@ -380,6 +355,7 @@
     <p id="games-error" role="alert" hidden></p>
     <div id="loading" role="status">Loading...</div>
     <button id="load-more" style="display: none;">Load More</button>
+    <footer class="deal-attribution">Deals from <a href="https://isthereanydeal.com/" target="_blank" rel="noopener noreferrer">IsThereAnyDeal</a></footer>
   </main>
   <script type="module" src="/app.js"></script>
 </body>
