@@ -8,7 +8,7 @@ Mission-control OpenTofu continues to own the custom domain, disabled workers.de
 
 ## Consequences
 
-- Production deployments are serialized by GitHub Actions and use a protected `production` environment restricted to `main`.
+- Production deployments are serialized by GitHub Actions; the deploy job and workflow trigger both restrict it to pushes on `main`.
 - The deployed Worker version is annotated with the exact Git commit SHA. The deploy job downloads the artifact from its own successful verification job rather than rebuilding it.
 - Pull-request jobs cannot read production environment secrets and have no deploy job.
 - A failed verification job cannot deploy. A newer queued production run replaces an older queued run; an already-running deployment completes before the newest run starts.
