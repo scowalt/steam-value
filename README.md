@@ -31,7 +31,7 @@ The always-on web surface runs as a **Cloudflare Worker with Static Assets** at 
 
 Operational boundaries:
 
-- **Steam Status** (wishlist, ignored, ownership, playtime): refreshed daily on arcane through a persistent Steel browser and the official owned-games API.
+- **Steam Status** (wishlist, ignored, ownership, playtime): refreshed daily on arcane through a persistent Steel browser plus Steam's owned-games and recently-played APIs.
 - **Catalog Facts** (tags, controller support, game modes, release dates): refreshed by occasional external/admin jobs.
 - **HowLongToBeat estimates**: manual/batch enrichment only; not run in the Worker.
 

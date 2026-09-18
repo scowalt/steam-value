@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   getSteamStatusCounts,
+  resolvePlaytimeMinutes,
   validateSteamStatusCounts,
   type SyncState,
 } from "./steam-status-sync";
@@ -68,5 +69,19 @@ describe("Steam Status validation", () => {
       ownedCount: 1,
       dynamicStoreOwnedCount: 1,
     });
+  });
+});
+
+describe("Steam playtime resolution", () => {
+  test("uses recently played totals for free games omitted from owned games", () => {
+    expect(resolvePlaytimeMinutes(null, undefined, 11)).toBe(11);
+  });
+
+  test("keeps recorded playtime after a game leaves the recent-games window", () => {
+    expect(resolvePlaytimeMinutes(11, undefined, undefined)).toBe(11);
+  });
+
+  test("never replaces a higher recorded total with stale API data", () => {
+    expect(resolvePlaytimeMinutes(120, 90, 110)).toBe(120);
   });
 });

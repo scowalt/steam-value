@@ -26,6 +26,7 @@ interface Game {
 }
 
 const tbody = document.getElementById("games-list")!;
+const gamesCards = document.getElementById("games-cards")!;
 const loading = document.getElementById("loading")!;
 const loadMoreBtn = document.getElementById("load-more") as HTMLButtonElement;
 const syncStatus = document.getElementById("sync-status")!;
@@ -97,6 +98,7 @@ async function loadGames() {
 function resetAndLoad() {
   // Reset state when filters change
   tbody.innerHTML = "";
+  gamesCards.innerHTML = "";
   offset = 0;
   allLoaded = false;
   allGames = [];
@@ -105,6 +107,10 @@ function resetAndLoad() {
 
 function renderGames() {
   tbody.innerHTML = "";
+  gamesCards.innerHTML = "";
+  const tableFragment = document.createDocumentFragment();
+  const cardsFragment = document.createDocumentFragment();
+
   allGames.forEach((game, i) => {
     const rank = i + 1;
     const tr = document.createElement("tr");
@@ -153,8 +159,56 @@ function renderGames() {
       <td class="ea">${game.isEarlyAccess ? '<span class="ea-check">✓</span>' : ''}</td>
       <td class="controller">${controllerHtml}</td>
     `;
-    tbody.appendChild(tr);
+    tableFragment.appendChild(tr);
+
+    const tags = [];
+    if (game.isOwned) tags.push('<span class="game-tag game-tag-owned">✓ Owned</span>');
+    if (game.isOnWishlist) tags.push('<span class="game-tag game-tag-wishlist">✓ Wishlist</span>');
+    if (game.hasSinglePlayer) tags.push('<span class="game-tag game-tag-sp">Single-player</span>');
+    if (game.hasMultiplayer) tags.push('<span class="game-tag game-tag-mp">Multiplayer</span>');
+    if (game.isEarlyAccess) tags.push('<span class="game-tag game-tag-ea">Early Access</span>');
+    if (game.controllerSupport === "full") {
+      tags.push('<span class="game-tag game-tag-controller-full">Full controller</span>');
+    } else if (game.controllerSupport === "partial") {
+      tags.push('<span class="game-tag game-tag-controller-partial">Partial controller</span>');
+    }
+
+    const card = document.createElement("article");
+    card.className = "game-card";
+    card.innerHTML = `
+      <div class="game-card-header">
+        <h2 class="game-card-title">
+          <span class="game-card-rank">#${rank}</span>
+          <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
+            ${escapeHtml(game.name)}
+          </a>
+        </h2>
+        <div class="game-card-score">
+          <span>Score</span>
+          <strong>${game.valueScore?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "N/A"}</strong>
+        </div>
+      </div>
+      <dl class="game-card-stats">
+        <div>
+          <dt>Reviews</dt>
+          <dd><span class="review-pct">${game.steamReviewScore}%</span> <span class="review-count">(${game.steamReviewCount.toLocaleString()})</span></dd>
+        </div>
+        <div>
+          <dt>HLTB</dt>
+          <dd>${game.hltbMain?.toFixed(1) ?? "?"} hrs</dd>
+        </div>
+        <div>
+          <dt>Played</dt>
+          <dd>${playtimeHtml}</dd>
+        </div>
+      </dl>
+      <div class="game-card-tags">${tags.length > 0 ? tags.join("") : '<span class="game-tag">Mode and controller unknown</span>'}</div>
+    `;
+    cardsFragment.appendChild(card);
   });
+
+  tbody.appendChild(tableFragment);
+  gamesCards.appendChild(cardsFragment);
 }
 
 function escapeHtml(text: string): string {

@@ -1,6 +1,6 @@
 # Arcane Steam Status refresh
 
-Steam Value uses a dedicated Steel browser on `arcane` to retain the authenticated Steam session in a Podman volume. The daily sync reads wishlist and ignored state inside that browser, reads ownership and playtime from Steam's API, validates the counts, and writes Steam Status to Turso.
+Steam Value uses a dedicated Steel browser on `arcane` to retain the authenticated Steam session in a Podman volume. The daily sync reads wishlist and ignored state inside that browser, reads ownership plus both library and recent playtime from Steam's API, validates the counts, and writes Steam Status to Turso. The recent-playtime feed covers free games that Steam omits from the owned-games response.
 
 ## Services
 

@@ -28,6 +28,11 @@ interface GetOwnedGamesResponse {
   };
 }
 
+interface SteamLibrarySnapshot {
+  ownedGames: Map<number, number>;
+  recentlyPlayedGames: Map<number, number>;
+}
+
 interface CurrentGameStatus {
   id: number;
   steamAppId: number;
@@ -110,12 +115,12 @@ export async function syncSteamStatus(
   env: SteamStatusEnv
 ): Promise<SyncResult> {
   return runSteamStatusSync(client, async () => {
-    const [userData, ownedGames] = await Promise.all([
+    const [userData, library] = await Promise.all([
       fetchSteamUserData(env),
-      fetchOwnedGames(env),
+      fetchSteamLibrary(env),
     ]);
 
-    return { userData, ownedGames };
+    return { userData, ...library };
   });
 }
 
@@ -124,15 +129,15 @@ export async function syncSteamStatusFromUserData(
   env: SteamStatusEnv,
   userData: SteamUserData
 ): Promise<SyncResult> {
-  return runSteamStatusSync(client, async () => ({
-    userData,
-    ownedGames: await fetchOwnedGames(env),
-  }));
+  return runSteamStatusSync(client, async () => {
+    const library = await fetchSteamLibrary(env);
+    return { userData, ...library };
+  });
 }
 
 async function runSteamStatusSync(
   client: Client,
-  loadData: () => Promise<{ userData: SteamUserData; ownedGames: Map<number, number> }>
+  loadData: () => Promise<{ userData: SteamUserData } & SteamLibrarySnapshot>
 ): Promise<SyncResult> {
   await ensureSyncStateTable(client);
 
@@ -153,7 +158,7 @@ async function runSteamStatusSync(
 
   try {
     const previousState = await getSyncState(client);
-    const { userData, ownedGames } = await loadData();
+    const { userData, ownedGames, recentlyPlayedGames } = await loadData();
     const counts = getSteamStatusCounts(userData, ownedGames);
     const validationError = validateSteamStatusCounts(counts, previousState);
     if (validationError) throw new Error(validationError);
@@ -168,9 +173,14 @@ async function runSteamStatusSync(
     for (const game of currentGames) {
       const isIgnored = ignoredSet.has(game.steamAppId);
       const isOnWishlist = wishlistSet.has(game.steamAppId);
-      const playtime = ownedGames.get(game.steamAppId);
-      const isOwned = playtime !== undefined;
-      const playtimeMinutes = playtime ?? null;
+      const ownedPlaytime = ownedGames.get(game.steamAppId);
+      const recentPlaytime = recentlyPlayedGames.get(game.steamAppId);
+      const isOwned = ownedPlaytime !== undefined;
+      const playtimeMinutes = resolvePlaytimeMinutes(
+        game.playtimeMinutes,
+        ownedPlaytime,
+        recentPlaytime
+      );
 
       if (
         game.isIgnored !== isIgnored ||
@@ -372,26 +382,59 @@ async function fetchSteamUserData(env: SteamStatusEnv): Promise<SteamUserData> {
   return (await response.json()) as SteamUserData;
 }
 
-async function fetchOwnedGames(env: SteamStatusEnv): Promise<Map<number, number>> {
+async function fetchSteamLibrary(env: SteamStatusEnv): Promise<SteamLibrarySnapshot> {
   if (!env.STEAM_API_KEY || !env.STEAM_ID) {
     throw new Error("Missing STEAM_API_KEY or STEAM_ID");
   }
 
-  const url = new URL("https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/");
-  url.searchParams.set("key", env.STEAM_API_KEY);
-  url.searchParams.set("steamid", env.STEAM_ID);
-  url.searchParams.set("include_played_free_games", "true");
+  const ownedGamesUrl = createPlayerServiceUrl("GetOwnedGames", env);
+  ownedGamesUrl.searchParams.set("include_played_free_games", "true");
 
-  const response = await fetch(url.toString());
+  const recentlyPlayedUrl = createPlayerServiceUrl("GetRecentlyPlayedGames", env);
+  recentlyPlayedUrl.searchParams.set("count", "100");
 
-  if (!response.ok) {
-    throw new Error(`Steam owned games error: ${response.status}`);
+  const [ownedGamesResponse, recentlyPlayedResponse] = await Promise.all([
+    fetch(ownedGamesUrl.toString()),
+    fetch(recentlyPlayedUrl.toString()),
+  ]);
+
+  if (!ownedGamesResponse.ok) {
+    throw new Error(`Steam owned games error: ${ownedGamesResponse.status}`);
+  }
+  if (!recentlyPlayedResponse.ok) {
+    throw new Error(`Steam recently played games error: ${recentlyPlayedResponse.status}`);
   }
 
-  const data = (await response.json()) as GetOwnedGamesResponse;
-  const games = data.response?.games ?? [];
+  const ownedGamesData = (await ownedGamesResponse.json()) as GetOwnedGamesResponse;
+  const recentlyPlayedData = (await recentlyPlayedResponse.json()) as GetOwnedGamesResponse;
+  const ownedGames = ownedGamesData.response?.games ?? [];
+  const recentlyPlayedGames = recentlyPlayedData.response?.games ?? [];
 
-  return new Map(games.map((game) => [game.appid, game.playtime_forever]));
+  return {
+    ownedGames: new Map(ownedGames.map((game) => [game.appid, game.playtime_forever])),
+    recentlyPlayedGames: new Map(
+      recentlyPlayedGames.map((game) => [game.appid, game.playtime_forever])
+    ),
+  };
+}
+
+function createPlayerServiceUrl(method: string, env: SteamStatusEnv): URL {
+  const url = new URL(`https://api.steampowered.com/IPlayerService/${method}/v1/`);
+  url.searchParams.set("key", env.STEAM_API_KEY!);
+  url.searchParams.set("steamid", env.STEAM_ID!);
+  return url;
+}
+
+export function resolvePlaytimeMinutes(
+  current: number | null,
+  owned: number | undefined,
+  recent: number | undefined
+): number | null {
+  const values = [current, owned, recent].filter(
+    (value): value is number => value != null && Number.isFinite(value) && value >= 0
+  );
+
+  return values.length > 0 ? Math.max(...values) : null;
 }
 
 async function fetchCurrentGameStatuses(client: Client): Promise<CurrentGameStatus[]> {

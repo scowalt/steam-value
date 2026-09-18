@@ -6,29 +6,78 @@
   <title>Steam Value Rankings</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { color-scheme: dark; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #1b2838;
       color: #c7d5e0;
-      padding: 2rem;
+      min-width: 280px;
+      padding: clamp(0.75rem, 3vw, 2rem);
+    }
+    .page-shell {
+      width: 100%;
+      max-width: 1600px;
+      margin: 0 auto;
     }
     h1 {
       color: #66c0f4;
-      margin-bottom: 1.5rem;
+      font-size: clamp(1.5rem, 3vw, 2rem);
+      line-height: 1.15;
     }
     .header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: flex-start;
+      gap: 1.5rem;
       margin-bottom: 1.5rem;
     }
-    .header h1 { margin-bottom: 0; }
-    #sync-status { color: #8f98a0; font-size: 0.85rem; }
-    .header-controls { display: flex; align-items: center; gap: 2rem; }
-    .filters { display: flex; align-items: center; gap: 1.5rem; }
-    .filters label { display: flex; align-items: center; gap: 0.5rem; color: #c7d5e0; font-size: 0.9rem; }
-    .filters input[type="checkbox"] { accent-color: #66c0f4; }
+    .title-block { flex: 0 0 auto; }
+    #sync-status {
+      display: block;
+      max-width: 32rem;
+      margin-top: 0.45rem;
+      color: #8f98a0;
+      font-size: 0.8rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .header-controls {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(max-content, 1fr));
+      gap: 0.5rem;
+    }
+    .filters label {
+      display: flex;
+      align-items: center;
+      min-height: 2.5rem;
+      gap: 0.5rem;
+      padding: 0.5rem 0.65rem;
+      border: 1px solid #2a475e;
+      border-radius: 6px;
+      background: #16202d;
+      color: #c7d5e0;
+      font-size: 0.85rem;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+    .filters label:focus-within { border-color: #66c0f4; }
+    .filters input[type="checkbox"] {
+      flex: 0 0 auto;
+      width: 1rem;
+      height: 1rem;
+      accent-color: #66c0f4;
+    }
+    .filters .select-filter {
+      align-items: stretch;
+      min-width: 8.75rem;
+    }
+    .select-filter span { align-self: center; }
     .filters select {
+      min-width: 0;
       background: #1b2838;
       border: 1px solid #66c0f4;
       color: #c7d5e0;
@@ -36,13 +85,17 @@
       border-radius: 4px;
       font-size: 0.9rem;
     }
-    .sync-controls { display: flex; align-items: center; }
+    .table-shell {
+      width: 100%;
+      overflow-x: auto;
+      border-radius: 8px;
+      scrollbar-color: #2a475e #16202d;
+    }
     table {
       width: 100%;
+      min-width: 920px;
       border-collapse: collapse;
       background: #16202d;
-      border-radius: 8px;
-      overflow: hidden;
     }
     th, td {
       padding: 0.75rem 1rem;
@@ -80,6 +133,92 @@
     a:hover { color: #66c0f4; }
     .review-pct { color: #a1cd44; }
     .review-count { color: #8f98a0; font-size: 0.9em; }
+    .games-cards { display: none; }
+    .game-card {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid #2a475e;
+      border-radius: 8px;
+      background: #16202d;
+    }
+    .game-card-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 0.75rem;
+      align-items: start;
+      padding: 0.9rem;
+    }
+    .game-card-title {
+      display: flex;
+      min-width: 0;
+      gap: 0.5rem;
+      align-items: baseline;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+    .game-card-title a { overflow-wrap: anywhere; }
+    .game-card-rank {
+      flex: 0 0 auto;
+      color: #8f98a0;
+      font-size: 0.8rem;
+      font-weight: 400;
+    }
+    .game-card-score {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      color: #8f98a0;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .game-card-score strong {
+      color: #a1cd44;
+      font-size: 1.15rem;
+      line-height: 1.2;
+    }
+    .game-card-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border-top: 1px solid #2a475e;
+      border-bottom: 1px solid #2a475e;
+    }
+    .game-card-stats div {
+      min-width: 0;
+      padding: 0.65rem 0.75rem;
+    }
+    .game-card-stats div + div { border-left: 1px solid #2a475e; }
+    .game-card-stats dt {
+      margin-bottom: 0.2rem;
+      color: #8f98a0;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .game-card-stats dd {
+      min-width: 0;
+      font-size: 0.82rem;
+      overflow-wrap: anywhere;
+    }
+    .game-card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.7rem 0.9rem;
+    }
+    .game-tag {
+      padding: 0.25rem 0.45rem;
+      border-radius: 999px;
+      background: #1b2838;
+      color: #8f98a0;
+      font-size: 0.72rem;
+      line-height: 1;
+    }
+    .game-tag-owned { color: #66c0f4; }
+    .game-tag-wishlist, .game-tag-sp, .game-tag-controller-full { color: #a1cd44; }
+    .game-tag-mp { color: #66c0f4; }
+    .game-tag-ea { color: #8fbf24; }
+    .game-tag-controller-partial { color: #c7923e; }
     #loading {
       text-align: center;
       padding: 2rem;
@@ -103,72 +242,99 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
+    @media (max-width: 1500px) {
+      .header { flex-direction: column; }
+      .header-controls { width: 100%; }
+      .filters { grid-template-columns: repeat(auto-fit, minmax(9.75rem, 1fr)); }
+      .filters .select-filter {
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .select-filter span { align-self: flex-start; }
+      .filters select { width: 100%; }
+    }
+    @media (max-width: 900px) {
+      .table-shell { display: none; }
+      .games-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+        gap: 0.75rem;
+      }
+    }
+    @media (max-width: 350px) {
+      .filters { grid-template-columns: 1fr; }
+      .game-card-stats div { padding-inline: 0.5rem; }
+    }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>Steam Value Rankings</h1>
-    <div class="header-controls">
-      <div class="filters">
-        <label>
-          <input type="checkbox" id="hide-ea"> Hide Early Access
-        </label>
-        <label>
-          <input type="checkbox" id="hide-played"> Hide Played
-        </label>
-        <label>
-          <input type="checkbox" id="hide-mmo"> Hide MMO
-        </label>
-        <label>
-          <input type="checkbox" id="hide-ignored" checked> Hide Ignored
-        </label>
-        <label>
-          <input type="checkbox" id="single-only"> Single-player only
-        </label>
-        <label>
-          Co-op:
-          <select id="coop-filter">
-            <option value="any">Any</option>
-            <option value="has-coop">Has Co-op</option>
-            <option value="online-coop">Online Co-op</option>
-            <option value="local-coop">Local Co-op</option>
-          </select>
-        </label>
-        <label>
-          Controller:
-          <select id="controller-filter">
-            <option value="any">Any</option>
-            <option value="full">Full only</option>
-            <option value="partial">Partial+</option>
-          </select>
-        </label>
+  <main class="page-shell">
+    <header class="header">
+      <div class="title-block">
+        <h1>Steam Value Rankings</h1>
+        <span id="sync-status" role="status" aria-live="polite"></span>
       </div>
-      <div class="sync-controls">
-        <span id="sync-status"></span>
+      <div class="header-controls">
+        <form class="filters" aria-label="Filter games">
+          <label>
+            <input type="checkbox" id="hide-ea"> Hide Early Access
+          </label>
+          <label>
+            <input type="checkbox" id="hide-played"> Hide Played
+          </label>
+          <label>
+            <input type="checkbox" id="hide-mmo"> Hide MMO
+          </label>
+          <label>
+            <input type="checkbox" id="hide-ignored" checked> Hide Ignored
+          </label>
+          <label>
+            <input type="checkbox" id="single-only"> Single-player only
+          </label>
+          <label class="select-filter">
+            <span>Co-op</span>
+            <select id="coop-filter">
+              <option value="any">Any</option>
+              <option value="has-coop">Has Co-op</option>
+              <option value="online-coop">Online Co-op</option>
+              <option value="local-coop">Local Co-op</option>
+            </select>
+          </label>
+          <label class="select-filter">
+            <span>Controller</span>
+            <select id="controller-filter">
+              <option value="any">Any</option>
+              <option value="full">Full only</option>
+              <option value="partial">Partial+</option>
+            </select>
+          </label>
+        </form>
       </div>
+    </header>
+    <div class="table-shell" role="region" aria-label="Ranked games table" tabindex="0">
+      <table>
+        <thead>
+          <tr>
+            <th title="Wishlist">WL</th>
+            <th title="Owned">Own</th>
+            <th>#</th>
+            <th>Game</th>
+            <th>Score</th>
+            <th>Reviews</th>
+            <th title="How Long to Beat">HLTB</th>
+            <th title="Your Playtime">Played</th>
+            <th title="Single/Multiplayer">Mode</th>
+            <th>EA</th>
+            <th>Controller</th>
+          </tr>
+        </thead>
+        <tbody id="games-list"></tbody>
+      </table>
     </div>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th title="Wishlist">WL</th>
-        <th title="Owned">Own</th>
-        <th>#</th>
-        <th>Game</th>
-        <th>Score</th>
-        <th>Reviews</th>
-        <th title="How Long to Beat">HLTB</th>
-        <th title="Your Playtime">Played</th>
-        <th title="Single/Multiplayer">Mode</th>
-        <th>EA</th>
-        <th>Controller</th>
-      </tr>
-    </thead>
-    <tbody id="games-list">
-    </tbody>
-  </table>
-  <div id="loading">Loading...</div>
-  <button id="load-more" style="display: none;">Load More</button>
+    <section id="games-cards" class="games-cards" aria-label="Ranked games"></section>
+    <div id="loading">Loading...</div>
+    <button id="load-more" style="display: none;">Load More</button>
+  </main>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
