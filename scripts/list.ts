@@ -18,13 +18,9 @@ async function main() {
     process.exit(0);
   }
 
-  // Separate into ranked games and endless games
   const rankedGames = allGames.filter((g) => !g.isEndless);
   const endlessGames = allGames.filter((g) => g.isEndless);
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RANKED GAMES SECTION
-  // ═══════════════════════════════════════════════════════════════════════════
   console.log("═".repeat(80));
   console.log("STEAM VALUE - Ranked Games");
   console.log("═".repeat(80));
@@ -32,7 +28,6 @@ async function main() {
   console.log("─".repeat(80));
 
   if (rankedGames.length > 0) {
-    // Sort ranked games by value score
     const sortedRanked = [...rankedGames].sort((a, b) => {
       if (a.valueScore === null && b.valueScore === null) return 0;
       if (a.valueScore === null) return 1;
@@ -40,7 +35,6 @@ async function main() {
       return b.valueScore - a.valueScore;
     });
 
-    // Print header
     console.log(
       padRight("Rank", 6) +
       padRight("Value", 8) +
@@ -51,7 +45,6 @@ async function main() {
     );
     console.log("─".repeat(80));
 
-    // Print each game
     sortedRanked.forEach((game, index) => {
       const rank = game.valueScore !== null ? `#${index + 1}` : "";
       const value = game.valueScore?.toFixed(2) ?? "N/A";
@@ -80,9 +73,6 @@ async function main() {
     console.log("No ranked games yet.");
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ENDLESS GAMES SECTION
-  // ═══════════════════════════════════════════════════════════════════════════
   if (endlessGames.length > 0) {
     console.log("\n" + "═".repeat(80));
     console.log("ENDLESS / MULTIPLAYER GAMES (not ranked)");
@@ -97,7 +87,6 @@ async function main() {
     );
     console.log("─".repeat(80));
 
-    // Sort by review score
     const sortedEndless = [...endlessGames].sort(
       (a, b) => (b.steamReviewScore ?? 0) - (a.steamReviewScore ?? 0)
     );
@@ -120,7 +109,6 @@ async function main() {
     console.log(`Total endless: ${endlessGames.length} games`);
   }
 
-  // Summary
   console.log("\n" + "═".repeat(80));
   console.log(`Total: ${allGames.length} games (${rankedGames.length} ranked, ${endlessGames.length} endless)`);
   console.log("═".repeat(80));

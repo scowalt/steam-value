@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Prepare Turso for the Cloudflare Worker runtime.
- * Safe to run repeatedly.
- */
 import { createClient } from "@libsql/client";
 import { ensureSyncStateTable } from "../src/services/steam-status-sync";
 import { ensureDealTables } from "../src/services/game-deals";

@@ -1,4 +1,3 @@
-// Shared wire types only: no credentials, network clients, or database code.
 export const DEAL_COUNTRY = "US";
 export const DEAL_MAX_AGE_SECONDS = 24 * 60 * 60;
 
@@ -15,7 +14,6 @@ export interface DealOffer {
   voucher: string | null;
   note: string | null;
   expiresAt: number | null;
-  // Earlier of the successful source fetch + 24 hours and known offer expiry.
   validUntil: number;
 }
 

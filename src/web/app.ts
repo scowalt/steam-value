@@ -16,7 +16,6 @@ interface Game {
   isOwned: boolean;
   playtimeMinutes: number | null;
   isIgnored: boolean;
-  // Game modes
   hasSinglePlayer: boolean;
   hasMultiplayer: boolean;
   hasCoOp: boolean;
@@ -100,7 +99,6 @@ async function loadGames() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const games = (await res.json()) as Game[];
     if (!Array.isArray(games)) throw new Error("Invalid games response");
-    // Aborting alone is insufficient when an earlier response is already being decoded.
     if (version !== requestVersion) return;
 
     allLoaded = games.length < limit;
@@ -128,7 +126,6 @@ async function loadGames() {
 }
 
 function resetAndLoad() {
-  // Invalidate both in-flight pages and filter responses before starting the new ranking.
   requestVersion++;
   gamesRequest?.abort();
   gamesRequest = null;
@@ -142,7 +139,6 @@ function resetAndLoad() {
 }
 
 function visibleGames(now: number): Game[] {
-  // The server filters BEFORE pagination. This only removes offers that expired in this tab.
   return onSaleCheckbox.checked ? allGames.filter((game) => activeOffers(game.deals, now).length > 0) : allGames;
 }
 
@@ -164,7 +160,6 @@ function checkDealExpiry() {
   if (nextExpiry === null || nextExpiry > Date.now() / 1000) return;
   updateNextExpiry();
   if (onSaleCheckbox.checked) {
-    // Restart server pagination because expiry can change membership anywhere in the ranking.
     resetAndLoad();
   } else {
     renderGames();
@@ -191,14 +186,12 @@ function renderGames() {
       controllerHtml = '<span class="controller-partial">Partial</span>';
     }
 
-    // Format playtime in hours (from minutes)
     let playtimeHtml = "-";
     if (game.playtimeMinutes !== null && game.playtimeMinutes > 0) {
       const hours = game.playtimeMinutes / 60;
       playtimeHtml = hours >= 1 ? `${hours.toFixed(1)}h` : `${game.playtimeMinutes}m`;
     }
 
-    // Format game mode
     let modeHtml = "";
     if (game.hasSinglePlayer && !game.hasMultiplayer) {
       modeHtml = '<span class="mode-sp">SP</span>';
@@ -293,7 +286,6 @@ async function loadSyncState() {
     const state = (await res.json()) as SyncState | null;
     renderSyncState(state);
   } catch {
-    // Keep the games list usable even if status metadata fails to load.
   }
 }
 
@@ -340,7 +332,6 @@ document.addEventListener("visibilitychange", () => {
     checkDealExpiry();
   }
 });
-// Background tabs may throttle timers; visibilitychange also checks before showing old offers.
 setInterval(checkDealExpiry, 30_000);
 void loadGames();
 void loadSyncState();

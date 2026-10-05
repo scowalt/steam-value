@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-// Test Wikidata SPARQL query for Steam-HLTB mappings
 
 const SPARQL_ENDPOINT = "https://query.wikidata.org/sparql";
 

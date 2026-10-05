@@ -3,7 +3,6 @@ import { createClient } from "@libsql/client";
 import { ItadClient } from "../src/services/itad-client";
 import { refreshGameDeals } from "../src/services/deal-refresh";
 
-// --limit is for a bounded initial verification; normal scheduled runs cover all rankings.
 const args = process.argv.slice(2);
 let limit: number | undefined;
 if (args.length) {

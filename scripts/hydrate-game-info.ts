@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Hydrate game info (Early Access + Controller Support) for all games.
- */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";

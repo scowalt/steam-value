@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Hydrate Early Access status for all games in the database.
- */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";

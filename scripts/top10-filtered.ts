@@ -4,7 +4,6 @@ import { games } from "../src/db/schema";
 
 const allGames = await db.query.games.findMany();
 
-// Filter: has value score, not endless, has reasonable HLTB data (>5h)
 const ranked = allGames.filter(g =>
   g.valueScore !== null &&
   !g.isEndless &&
@@ -33,7 +32,6 @@ console.log("─".repeat(72));
 console.log(`Total games: ${allGames.length} | With valid data (>5h): ${ranked.length}`);
 console.log("");
 
-// Also show some stats
 const avgValue = sorted.reduce((sum, g) => sum + (g.valueScore ?? 0), 0) / sorted.length;
 const avgHours = sorted.reduce((sum, g) => sum + (g.hltbMain ?? 0), 0) / sorted.length;
 console.log(`Average value score: ${avgValue.toFixed(2)}`);

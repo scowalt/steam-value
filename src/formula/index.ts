@@ -8,19 +8,9 @@ export interface ValueScoreInput {
   hltbMainExtra: number | null;
   hltbCompletionist: number | null;
   isEndless?: boolean | null;
-  releaseDate?: string | null; // ISO date string "YYYY-MM-DD"
+  releaseDate?: string | null;  
 }
 
-/**
- * Calculate the value score for a game.
- *
- * The formula rewards:
- * - Higher review scores (with Bayesian confidence scaling)
- * - Shorter completion times (quality density)
- * - Newer releases (age decay)
- *
- * Returns null if required data is missing.
- */
 export function calculateValueScore(input: ValueScoreInput): number | null {
   const { steamReviewScore, steamReviewCount, hltbMain, hltbMainExtra, hltbCompletionist, isEndless, releaseDate } = input;
   const {
@@ -34,17 +24,14 @@ export function calculateValueScore(input: ValueScoreInput): number | null {
     minAgeMultiplier,
   } = formulaConfig;
 
-  // Endless games (MMO/survival/multiplayer) don't get value scores
   if (isEndless) {
     return null;
   }
 
-  // Check for required data
   if (steamReviewScore === null || steamReviewScore === undefined) {
     return null;
   }
 
-  // Get the appropriate time metric
   let hours: number | null;
   switch (timeMetric) {
     case "main":
@@ -58,29 +45,23 @@ export function calculateValueScore(input: ValueScoreInput): number | null {
       break;
   }
 
-  // If no HLTB data, return null (can't calculate density)
   if (hours === null || hours === undefined) {
     return null;
   }
 
-  // Apply minimum hours floor
   const effectiveHours = Math.max(hours, minHours);
 
-  // Bayesian confidence scaling: pull low-review scores toward baseline
   let confidenceScore = steamReviewScore;
   if (steamReviewCount && steamReviewCount > 0) {
     const confidence = steamReviewCount / (steamReviewCount + confidenceThreshold);
     confidenceScore = steamReviewScore * confidence + baselineScore * (1 - confidence);
   } else {
-    // No reviews = baseline score
     confidenceScore = baselineScore;
   }
 
-  // Base formula: quality^exponent / time^exponent
   const adjustedScore = Math.pow(confidenceScore, reviewScoreExponent);
   let score = adjustedScore / Math.pow(effectiveHours, hoursPenaltyExponent);
 
-  // Age decay: penalize older games
   if (releaseDate) {
     const releaseYear = new Date(releaseDate).getFullYear();
     const currentYear = new Date().getFullYear();
@@ -89,12 +70,9 @@ export function calculateValueScore(input: ValueScoreInput): number | null {
     score *= ageMultiplier;
   }
 
-  return Math.round(score * 100) / 100; // Round to 2 decimal places
+  return Math.round(score * 100) / 100;  
 }
 
-/**
- * Calculate value score for a Game record from the database.
- */
 export function calculateGameValueScore(game: Game): number | null {
   return calculateValueScore({
     steamReviewScore: game.steamReviewScore,
@@ -107,9 +85,6 @@ export function calculateGameValueScore(game: Game): number | null {
   });
 }
 
-/**
- * Format a value score for display.
- */
 export function formatValueScore(score: number | null): string {
   if (score === null) return "N/A";
   return score.toFixed(2);

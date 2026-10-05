@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Fast hydration of EA + Controller Support
- * Fetches appdetails once per game (2x faster than separate calls)
- */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { eq } from "drizzle-orm";
@@ -21,7 +17,7 @@ async function fetchAppDetails(appId: number): Promise<AppDetails | null> {
   const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
   try {
     const res = await fetch(url);
-    if (res.status === 429) return null; // Rate limited
+    if (res.status === 429) return null;  
     const data = await res.json();
     return data[appId.toString()] || null;
   } catch {
@@ -45,7 +41,6 @@ async function main() {
     let appDetails: AppDetails | null = null;
     let retries = 0;
 
-    // Fetch with retry
     while (retries < 3) {
       appDetails = await fetchAppDetails(game.steamAppId);
       if (appDetails !== null) break;
@@ -60,14 +55,12 @@ async function main() {
       if (processed % 50 === 0) {
         console.log(`Progress: ${processed}/${allGames.length}`);
       }
-      await sleep(1500); // Rate limit
+      await sleep(1500);  
       continue;
     }
 
-    // Extract EA from genres (ID 70)
     const isEA = appDetails.data.genres?.some((g) => g.id === "70") ?? false;
 
-    // Extract controller support from categories (28=full, 18=partial)
     let controller: "full" | "partial" | null = null;
     if (appDetails.data.categories?.some((c) => c.id === 28)) {
       controller = "full";
@@ -106,7 +99,7 @@ async function main() {
       console.log(`Progress: ${processed}/${allGames.length}`);
     }
 
-    await sleep(1500); // Rate limit between games
+    await sleep(1500);  
   }
 
   console.log(`\nDone!`);

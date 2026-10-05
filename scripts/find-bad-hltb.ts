@@ -3,7 +3,6 @@ import { db } from "../src/db/client";
 
 const all = await db.query.games.findMany();
 
-// Games with suspiciously short times (< 3h) that are likely wrong
 const suspicious = all
   .filter(g => g.hltbMain !== null && g.hltbMain < 3 && !g.isEndless)
   .sort((a, b) => (a.hltbMain ?? 0) - (b.hltbMain ?? 0));

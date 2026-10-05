@@ -1,11 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Sync the Worker runtime secrets from Doppler.
- *
- * Usage:
- *   bun scripts/cloudflare-secrets.ts dev-vars  # writes .dev.vars for wrangler dev
- *   bun scripts/cloudflare-secrets.ts sync      # uploads selected secrets to Cloudflare
- */
 
 const SECRET_KEYS = [
   "TURSO_DATABASE_URL",

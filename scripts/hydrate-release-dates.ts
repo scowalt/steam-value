@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Hydrate release dates for all games from Steam API.
- */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";
@@ -18,7 +15,6 @@ async function main() {
   for (const game of allGames) {
     processed++;
 
-    // Skip if already has release date
     if (game.releaseDate) {
       if (processed % 50 === 0) {
         console.log(`Progress: ${processed}/${allGames.length}`);

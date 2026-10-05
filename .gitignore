@@ -1,24 +1,18 @@
-# dependencies (bun install)
 node_modules
 
-# output
 out
 dist
 *.tgz
 
-# drizzle migrations (generated)
 drizzle
 
-# code coverage
 coverage
 *.lcov
 
-# logs
 logs
 _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
-# dotenv environment variable files
 .env
 .dev.vars
 .env.development.local
@@ -26,19 +20,15 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.production.local
 .env.local
 
-# caches
 .eslintcache
 .cache
 .wrangler
 *.tsbuildinfo
 
-# IntelliJ based IDEs
 .idea
 
-# Cursor IDE
 .cursor
 
-# Finder (MacOS) folder config
 .DS_Store
 src/data/steamdb-raw.json
 .steam-session/

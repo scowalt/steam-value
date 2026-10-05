@@ -20,7 +20,6 @@ async function main() {
     process.exit(0);
   }
 
-  // Compute all scores in memory first
   const updates: { id: number; name: string; oldScore: number | null; newScore: number | null }[] = [];
   let unchanged = 0;
 
@@ -35,7 +34,6 @@ async function main() {
 
   console.log(`Computed scores: ${updates.length} to update, ${unchanged} unchanged`);
 
-  // Batch update using raw client for transaction batching
   const client = createClient({
     url: process.env.TURSO_DATABASE_URL!,
     authToken: process.env.TURSO_AUTH_TOKEN,
@@ -62,7 +60,6 @@ async function main() {
     }
   }
 
-  // Log some examples
   const examples = updates.slice(0, 10);
   for (const u of examples) {
     const changeStr = u.oldScore !== null && u.newScore !== null

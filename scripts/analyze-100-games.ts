@@ -6,10 +6,7 @@ import { getHltbById } from "../src/scrapers/hltb";
 import { calculateValueScore } from "../src/formula";
 import { eq, desc } from "drizzle-orm";
 
-// 100 popular Steam games with verified HLTB IDs
-// Format: { steamId, hltbId, name, endless? }
 const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: boolean }[] = [
-  // === RPGs ===
   { steamId: 1086940, hltbId: 68033, name: "Baldur's Gate 3" },
   { steamId: 1245620, hltbId: 68151, name: "ELDEN RING" },
   { steamId: 1091500, hltbId: 2127, name: "Cyberpunk 2077" },
@@ -28,7 +25,6 @@ const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: 
   { steamId: 1627720, hltbId: 115655, name: "Lies of P" },
   { steamId: 2358720, hltbId: 127308, name: "Black Myth: Wukong" },
 
-  // === Action/Adventure ===
   { steamId: 367520, hltbId: 26286, name: "Hollow Knight" },
   { steamId: 1145360, hltbId: 69955, name: "Hades" },
   { steamId: 1593500, hltbId: 70727, name: "God of War" },
@@ -42,7 +38,6 @@ const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: 
   { steamId: 1174180, hltbId: 61912, name: "Red Dead Redemption 2" },
   { steamId: 271590, hltbId: 4063, name: "Grand Theft Auto V" },
 
-  // === Indie Gems ===
   { steamId: 504230, hltbId: 49970, name: "Celeste" },
   { steamId: 588650, hltbId: 50614, name: "Dead Cells" },
   { steamId: 646570, hltbId: 52827, name: "Slay the Spire" },
@@ -54,7 +49,6 @@ const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: 
   { steamId: 1966720, hltbId: 117429, name: "Lethal Company" },
   { steamId: 892970, hltbId: 69175, name: "Valheim", endless: true },
 
-  // === Shooters (Story) ===
   { steamId: 220, hltbId: 4210, name: "Half-Life 2" },
   { steamId: 620, hltbId: 8016, name: "Portal 2" },
   { steamId: 400, hltbId: 8017, name: "Portal" },
@@ -67,7 +61,6 @@ const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: 
   { steamId: 412020, hltbId: 58916, name: "Metro Exodus" },
   { steamId: 548430, hltbId: 61305, name: "Deep Rock Galactic", endless: true },
 
-  // === Strategy ===
   { steamId: 289070, hltbId: 36705, name: "Civilization VI" },
   { steamId: 394360, hltbId: 33233, name: "Hearts of Iron IV" },
   { steamId: 1142710, hltbId: 55463, name: "Total War: WARHAMMER III" },
@@ -78,7 +71,6 @@ const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: 
   { steamId: 268500, hltbId: 36879, name: "XCOM 2" },
   { steamId: 1363080, hltbId: 120823, name: "Manor Lords" },
 
-  // === Survival/Sandbox (Endless) ===
   { steamId: 105600, hltbId: 10056, name: "Terraria" },
   { steamId: 427520, hltbId: 40064, name: "Factorio", endless: true },
   { steamId: 294100, hltbId: 18838, name: "RimWorld", endless: true },
@@ -88,45 +80,38 @@ const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: 
   { steamId: 221100, hltbId: 4112, name: "DayZ", endless: true },
   { steamId: 1604030, hltbId: 101459, name: "V Rising", endless: true },
 
-  // === Simulation ===
   { steamId: 227300, hltbId: 5003, name: "Euro Truck Simulator 2" },
   { steamId: 2300320, hltbId: 125553, name: "Farming Simulator 25" },
   { steamId: 1551360, hltbId: 89890, name: "Forza Horizon 5" },
 
-  // === Platformers ===
   { steamId: 261570, hltbId: 25174, name: "Ori and the Blind Forest" },
   { steamId: 1057090, hltbId: 70780, name: "Ori and the Will of Wisps" },
   { steamId: 250760, hltbId: 22050, name: "Shovel Knight" },
   { steamId: 40800, hltbId: 9960, name: "Super Meat Boy" },
   { steamId: 322170, hltbId: 16369, name: "Geometry Dash" },
 
-  // === Horror ===
   { steamId: 57300, hltbId: 915, name: "Amnesia: The Dark Descent" },
   { steamId: 238320, hltbId: 15012, name: "Outlast" },
   { steamId: 282140, hltbId: 23561, name: "SOMA" },
   { steamId: 418240, hltbId: 86959, name: "Shadow of the Tomb Raider" },
 
-  // === Puzzle/Narrative ===
   { steamId: 653530, hltbId: 58033, name: "Return of the Obra Dinn" },
   { steamId: 210970, hltbId: 15091, name: "The Witness" },
   { steamId: 501300, hltbId: 46393, name: "What Remains of Edith Finch" },
   { steamId: 383870, hltbId: 37675, name: "Firewatch" },
   { steamId: 319630, hltbId: 28085, name: "Life is Strange" },
 
-  // === Metroidvania/Roguelikes ===
   { steamId: 774361, hltbId: 61023, name: "Blasphemous" },
   { steamId: 283640, hltbId: 29054, name: "Salt and Sanctuary" },
   { steamId: 311690, hltbId: 40314, name: "Enter the Gungeon" },
   { steamId: 250900, hltbId: 25123, name: "Binding of Isaac: Rebirth" },
   { steamId: 632360, hltbId: 60417, name: "Risk of Rain 2" },
 
-  // === Multiplayer (Endless) ===
   { steamId: 381210, hltbId: 28631, name: "Dead by Daylight", endless: true },
   { steamId: 359550, hltbId: 32573, name: "Rainbow Six Siege", endless: true },
   { steamId: 4000, hltbId: 4212, name: "Garry's Mod", endless: true },
   { steamId: 1623730, hltbId: 114063, name: "Palworld" },
 
-  // === Classic/Popular ===
   { steamId: 20920, hltbId: 10268, name: "The Witcher 2" },
   { steamId: 524220, hltbId: 54308, name: "NieR:Automata" },
   { steamId: 1222670, hltbId: 109976, name: "The Last of Us Part I" },
@@ -150,7 +135,6 @@ async function addGame(steamId: number, hltbId: number, expectedName: string, is
     try {
       hltbData = await getHltbById(hltbId);
     } catch {
-      // HLTB fetch failed, continue without it
     }
 
     const valueScore = calculateValueScore({
@@ -210,7 +194,6 @@ async function main() {
       results.errors++;
     }
 
-    // Rate limiting to avoid being blocked
     await new Promise((r) => setTimeout(r, 350));
   }
 
@@ -218,7 +201,6 @@ async function main() {
   console.log(`  Summary: ${results.added} added, ${results.exists} existing, ${results.errors} errors`);
   console.log(`${"─".repeat(78)}\n`);
 
-  // === Display Top 10 ===
   const allGames = await db.query.games.findMany();
   const rankedGames = allGames.filter((g) => g.valueScore !== null && !g.isEndless);
   const byValue = [...rankedGames].sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
@@ -239,7 +221,6 @@ async function main() {
   });
   console.log("╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
-  // Summary stats
   const endlessGames = allGames.filter((g) => g.isEndless);
   console.log(`Total games analyzed: ${allGames.length}`);
   console.log(`Ranked games: ${rankedGames.length} | Endless games: ${endlessGames.length}`);

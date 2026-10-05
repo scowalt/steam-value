@@ -1,9 +1,4 @@
 #!/usr/bin/env bun
-/**
- * One-time script to get a Steam refresh token via QR code login.
- * Scan the QR code with your Steam mobile app.
- * The refresh token and fresh web cookie are saved to Doppler.
- */
 import { LoginSession, EAuthTokenPlatformType } from "steam-session";
 
 async function main() {
@@ -47,7 +42,6 @@ async function main() {
   console.log(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(result.qrChallengeUrl!)}`);
   console.log("\nWaiting for scan (5 minutes timeout)...");
 
-  // Wait up to 5 minutes
   await new Promise((r) => setTimeout(r, 300000));
   console.log("Timed out. Run again.");
   process.exit(1);

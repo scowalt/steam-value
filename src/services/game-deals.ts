@@ -22,7 +22,6 @@ export async function ensureDealTables(client: Client): Promise<void> {
   ], "write");
 }
 
-/** Correlated EXISTS avoids duplicates and filters before ranking/pagination. */
 export const ON_SALE_SQL = `EXISTS (
   SELECT 1 FROM game_deal_cache dc, json_each(dc.offers_json) offer
   WHERE dc.steam_app_id = games.steam_app_id AND dc.country = ?

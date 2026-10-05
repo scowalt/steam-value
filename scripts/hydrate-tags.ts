@@ -1,12 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Hydrate tags from SteamSpy community tags for all games missing them.
- * Usage: bun scripts/hydrate-tags.ts [--limit N]
- *
- * SteamSpy tags are community-driven and much richer than Steam's built-in
- * genres/categories — they include tags like "City Builder", "Colony Sim",
- * "Roguelike", "Souls-like", etc.
- */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { eq, isNull } from "drizzle-orm";
@@ -17,10 +9,6 @@ interface SteamSpyResponse {
   tags?: Record<string, number>;
 }
 
-/**
- * Fetch community tags from SteamSpy for a given app ID.
- * Returns tag names sorted by usage count (descending).
- */
 async function fetchSteamSpyTags(appId: number): Promise<string[] | null> {
   const url = `https://steamspy.com/api.php?request=appdetails&appid=${appId}`;
   const response = await fetch(url);
@@ -35,7 +23,6 @@ async function fetchSteamSpyTags(appId: number): Promise<string[] | null> {
     return null;
   }
 
-  // Sort by usage count descending, return tag names
   const sorted = Object.entries(data.tags)
     .sort(([, a], [, b]) => b - a)
     .map(([name]) => name);
@@ -62,7 +49,6 @@ async function main() {
   for (const game of gamesToHydrate) {
     processed++;
 
-    // Rate limit: 1 request per second for SteamSpy
     if (processed > 1) {
       await sleep(1000);
     }

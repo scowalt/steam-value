@@ -14,7 +14,6 @@ console.log(`Ranked (with scores):  ${ranked.length}`);
 console.log(`Endless/Multiplayer:   ${endless.length}`);
 console.log(`Valid HLTB data (>5h): ${withHltb.length}`);
 
-// Top 10
 const sorted = ranked.filter(g => g.hltbMain && g.hltbMain > 5).sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
 console.log("\n" + "═".repeat(60));
 console.log("TOP 10 BY VALUE SCORE");
@@ -30,7 +29,6 @@ sorted.slice(0, 10).forEach((g, i) => {
   console.log(`${rank}   ${value}   ${rating}  ${hours}  ${name}`);
 });
 
-// Highest rated
 const byRating = [...ranked].sort((a, b) => (b.steamReviewScore ?? 0) - (a.steamReviewScore ?? 0));
 console.log("\n" + "═".repeat(60));
 console.log("HIGHEST RATED");
@@ -39,7 +37,6 @@ byRating.slice(0, 5).forEach((g, i) => {
   console.log(`${i+1}. ${g.name.slice(0,40)} - ${g.steamReviewScore}%`);
 });
 
-// Longest games
 const byLength = [...all].filter(g => g.hltbMain).sort((a, b) => (b.hltbMain ?? 0) - (a.hltbMain ?? 0));
 console.log("\n" + "═".repeat(60));
 console.log("LONGEST GAMES");
@@ -48,7 +45,6 @@ byLength.slice(0, 5).forEach((g, i) => {
   console.log(`${i+1}. ${g.name.slice(0,40)} - ${g.hltbMain?.toFixed(0)}h main story`);
 });
 
-// Best short games
 const shortGood = ranked.filter(g => g.hltbMain && g.hltbMain < 15 && g.steamReviewScore && g.steamReviewScore >= 90)
   .sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
 console.log("\n" + "═".repeat(60));
