@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-// Quick script to hydrate verified HLTB data for all games
-// Run: bun scripts/hydrate-hltb.ts
 
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
@@ -48,7 +46,6 @@ async function main() {
       console.log(`ERROR: ${e instanceof Error ? e.message : e}`);
     }
 
-    // Rate limit: 1 request per second
     await new Promise((r) => setTimeout(r, 1000));
   }
 

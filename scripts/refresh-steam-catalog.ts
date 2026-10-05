@@ -1,13 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Refresh the Steam catalog from official Steam endpoints.
- *
- * Catalog source: IStoreService/GetAppList with include_games=true.
- * Ratings source: Steam Store appreviews summary endpoint per app.
- *
- * The job is intentionally restartable: long full-catalog refreshes checkpoint
- * progress in Turso and can resume after network failures or process exits.
- */
 import { createClient, type Client } from "@libsql/client";
 
 const STATE_KEY = "steam_official_catalog";

@@ -60,7 +60,6 @@ async function main() {
 
   console.log(`Fetching data for Steam App ID: ${steamAppId}...`);
 
-  // Check if game already exists
   const existing = await db.query.games.findFirst({
     where: eq(games.steamAppId, steamAppId),
   });
@@ -71,21 +70,18 @@ async function main() {
     process.exit(0);
   }
 
-  // Check if game is on user's Steam ignored list
   if (!force && (await isIgnored(steamAppId))) {
     console.log("\nThis game is on your Steam 'Not Interested' list.");
     console.log("Use --force to add anyway.");
     process.exit(0);
   }
 
-  // Check if user has already played this game
   if (!force && (await hasPlayed(steamAppId))) {
     console.log("\nYou've already played this game.");
     console.log("Use --force to add anyway.");
     process.exit(0);
   }
 
-  // Check if it's actually a game
   console.log("\nChecking Steam app type...");
   const isActualGame = await isGame(steamAppId);
   if (!isActualGame) {
@@ -93,14 +89,12 @@ async function main() {
     process.exit(1);
   }
 
-  // Fetch Steam data
   console.log("\nFetching Steam data...");
   const steamData = await fetchSteamData(steamAppId);
   console.log(`  Name: ${steamData.name}`);
   console.log(`  Review Score: ${steamData.reviewScore}%`);
   console.log(`  Review Count: ${steamData.reviewCount.toLocaleString()}`);
 
-  // Check English language support
   if (!skipEnglishCheck) {
     const englishSupport = await hasEnglishSupport(steamAppId);
     if (englishSupport === false) {
@@ -112,14 +106,12 @@ async function main() {
     }
   }
 
-  // Verify HLTB mapping
   console.log(`\nLooking up HLTB data for "${steamData.name}"...`);
 
   const verification = hltbId
     ? await verifyManualHltbId(steamAppId, hltbId)
     : await verifyHltbMapping(steamAppId, steamData.name);
 
-  // Display verification result
   console.log(`  Status: ${verification.status.toUpperCase()}`);
   if (verification.hltbId) {
     console.log(`  HLTB ID: ${verification.hltbId}`);
@@ -129,7 +121,6 @@ async function main() {
   }
   console.log(`  ${verification.message}`);
 
-  // Determine what HLTB data to use
   let hltbData = verification.hltbData;
 
   if (verification.status === "verified") {
@@ -158,14 +149,12 @@ async function main() {
     console.log("    Use --hltb-id to manually specify an HLTB ID.");
   }
 
-  // Display HLTB data if we have it
   if (hltbData) {
     console.log(`\n  Main Story: ${hltbData.main?.toFixed(1) ?? "N/A"} hours`);
     console.log(`  Main + Extras: ${hltbData.mainExtra?.toFixed(1) ?? "N/A"} hours`);
     console.log(`  Completionist: ${hltbData.completionist?.toFixed(1) ?? "N/A"} hours`);
   }
 
-  // Calculate value score
   const valueScore = calculateValueScore({
     steamReviewScore: steamData.reviewScore,
     steamReviewCount: steamData.reviewCount,
@@ -177,7 +166,6 @@ async function main() {
 
   console.log(`\nValue Score: ${valueScore?.toFixed(2) ?? "N/A"}${isEndless ? " (endless game)" : ""}`);
 
-  // Insert into database
   const result = await db
     .insert(games)
     .values({
@@ -197,7 +185,6 @@ async function main() {
   const inserted = result[0];
   console.log(`\nGame saved to database (id: ${inserted?.id ?? "unknown"})`);
 
-  // Show verification status summary
   if (verification.status !== "verified" && !isEndless) {
     console.log("\n--- HLTB Status ---");
     if (verification.status === "no_candidate") {

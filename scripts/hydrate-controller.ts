@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Hydrate controller support for all games missing it
- */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { isNull, desc, eq } from "drizzle-orm";

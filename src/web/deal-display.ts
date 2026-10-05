@@ -17,7 +17,6 @@ export function activeOffers(deals: GameDeals | undefined, now: number): DealOff
   return (deals?.offers ?? []).filter((offer) => Number.isFinite(offer.validUntil) && offer.validUntil > now);
 }
 
-// Only future deadlines are watched. An empty/stale response must not cause a refetch loop.
 export function nextDealChange(deals: GameDeals | undefined, now: number): number | null {
   if (!deals) return null;
   const deadlines = activeOffers(deals, now).map((offer) => offer.validUntil);
@@ -29,21 +28,18 @@ export function nextDealChange(deals: GameDeals | undefined, now: number): numbe
 }
 
 function offerLink(offer: DealOffer, label: string): string {
-  // Validate the scheme without rewriting the original URL or its affiliate parameters.
   try {
     const url = new URL(offer.url);
     if (url.protocol === "https:" || url.protocol === "http:") {
       return `<a href="${escapeHtml(offer.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
     }
   } catch {
-    // Invalid links should never become executable markup.
   }
   return escapeHtml(label);
 }
 
 export function renderDeals(deals: GameDeals | undefined, now: number): string {
   const offers = activeOffers(deals, now);
-  // Keep the existing best-price selection; the badge describes that same offer.
   const retail = offers.filter((offer) => offer.kind === "retail")
     .sort((a, b) => (a.priceCents ?? Infinity) - (b.priceCents ?? Infinity))[0];
   const bundle = offers.find((offer) => offer.kind === "bundle");

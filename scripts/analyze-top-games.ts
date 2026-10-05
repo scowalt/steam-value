@@ -6,26 +6,20 @@ import { getHltbById } from "../src/scrapers/hltb";
 import { calculateValueScore } from "../src/formula";
 import { eq } from "drizzle-orm";
 
-// Top Steam games with verified HLTB IDs
-// Sources: howlongtobeat.com game URLs
 const TOP_GAMES: { steamId: number; hltbId: number; name: string }[] = [
-  // RPGs
   { steamId: 1086940, hltbId: 68033, name: "Baldur's Gate 3" },
   { steamId: 1245620, hltbId: 68151, name: "ELDEN RING" },
   { steamId: 1091500, hltbId: 2127, name: "Cyberpunk 2077" },
   { steamId: 489830, hltbId: 38557, name: "Skyrim Special Edition" },
 
-  // Open World
   { steamId: 271590, hltbId: 4063, name: "Grand Theft Auto V" },
   { steamId: 1174180, hltbId: 61912, name: "Red Dead Redemption 2" },
 
-  // Strategy
   { steamId: 289070, hltbId: 36705, name: "Civilization VI" },
   { steamId: 394360, hltbId: 33233, name: "Hearts of Iron IV" },
   { steamId: 1142710, hltbId: 55463, name: "Total War: WARHAMMER III" },
   { steamId: 261550, hltbId: 42489, name: "Mount & Blade II: Bannerlord" },
 
-  // Survival/Sandbox
   { steamId: 105600, hltbId: 10056, name: "Terraria" },
   { steamId: 108600, hltbId: 8525, name: "Project Zomboid" },
   { steamId: 413150, hltbId: 41753, name: "Stardew Valley" },
@@ -34,23 +28,18 @@ const TOP_GAMES: { steamId: number; hltbId: number; name: string }[] = [
   { steamId: 221100, hltbId: 4112, name: "DayZ" },
   { steamId: 227300, hltbId: 5003, name: "Euro Truck Simulator 2" },
 
-  // Simulation
   { steamId: 2300320, hltbId: 125553, name: "Farming Simulator 25" },
 
-  // Multiplayer focused (may not have HLTB main story)
   { steamId: 381210, hltbId: 28631, name: "Dead by Daylight" },
   { steamId: 359550, hltbId: 32573, name: "Rainbow Six Siege" },
 
-  // Indie/Other
   { steamId: 322170, hltbId: 16369, name: "Geometry Dash" },
   { steamId: 4000, hltbId: 4212, name: "Garry's Mod" },
 
-  // Action
   { steamId: 1623730, hltbId: 114063, name: "Palworld" },
 ];
 
 async function addGame(steamId: number, hltbId: number, expectedName: string) {
-  // Check if already exists
   const existing = await db.query.games.findFirst({
     where: eq(games.steamAppId, steamId),
   });
@@ -60,18 +49,14 @@ async function addGame(steamId: number, hltbId: number, expectedName: string) {
   }
 
   try {
-    // Fetch Steam data
     const steamData = await fetchSteamData(steamId);
 
-    // Fetch HLTB data (may fail)
     let hltbData = null;
     try {
       hltbData = await getHltbById(hltbId);
     } catch {
-      // HLTB fetch failed, continue without it
     }
 
-    // Calculate value score
     const valueScore = calculateValueScore({
       steamReviewScore: steamData.reviewScore,
       steamReviewCount: steamData.reviewCount,
@@ -80,7 +65,6 @@ async function addGame(steamId: number, hltbId: number, expectedName: string) {
       hltbCompletionist: hltbData?.completionist ?? null,
     });
 
-    // Insert into database
     const result = await db
       .insert(games)
       .values({
@@ -127,7 +111,6 @@ async function main() {
       results.errors++;
     }
 
-    // Rate limiting
     await new Promise((r) => setTimeout(r, 300));
   }
 
@@ -135,19 +118,14 @@ async function main() {
   console.log(`  Summary: ${results.added} added, ${results.exists} existing, ${results.errors} errors`);
   console.log(`${"─".repeat(78)}\n`);
 
-  // Fetch all games for analysis
   const allGames = await db.query.games.findMany();
   const gamesWithScore = allGames.filter((g) => g.valueScore !== null);
 
-  // Sort by different criteria
   const byValue = [...gamesWithScore].sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
   const byLength = [...allGames].filter(g => g.hltbMain).sort((a, b) => (b.hltbMain ?? 0) - (a.hltbMain ?? 0));
   const byReviewScore = [...allGames].sort((a, b) => (b.steamReviewScore ?? 0) - (a.steamReviewScore ?? 0));
   const byReviewCount = [...allGames].sort((a, b) => (b.steamReviewCount ?? 0) - (a.steamReviewCount ?? 0));
 
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // TOP VALUE RANKINGS
-  // ═══════════════════════════════════════════════════════════════════════════════
   console.log("╔══════════════════════════════════════════════════════════════════════════════╗");
   console.log("║  🏆 TOP GAMES BY VALUE SCORE (Quality ÷ √Length)                             ║");
   console.log("╠══════════════════════════════════════════════════════════════════════════════╣");
@@ -164,14 +142,10 @@ async function main() {
   });
   console.log("╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
-  // ═══════════════════════════════════════════════════════════════════════════════
-  // HIGHLIGHTS
-  // ═══════════════════════════════════════════════════════════════════════════════
   console.log("╔══════════════════════════════════════════════════════════════════════════════╗");
   console.log("║  📊 ANALYSIS HIGHLIGHTS                                                      ║");
   console.log("╚══════════════════════════════════════════════════════════════════════════════╝\n");
 
-  // Best Value
   if (byValue[0]) {
     const g = byValue[0];
     console.log(`  🥇 BEST VALUE: ${g.name}`);
@@ -179,14 +153,12 @@ async function main() {
     console.log(`     High quality relative to time investment\n`);
   }
 
-  // Longest Epic Games
   console.log(`  📏 LONGEST GAMES (Most Content):`);
   byLength.slice(0, 5).forEach((g, i) => {
     const extras = g.hltbMainExtra ? ` (${g.hltbMainExtra.toFixed(0)}h with extras)` : "";
     console.log(`     ${i + 1}. ${g.name} - ${g.hltbMain?.toFixed(0)}h${extras}`);
   });
 
-  // Best Short Games
   const shortQuality = [...allGames]
     .filter(g => g.hltbMain && g.hltbMain < 30 && g.steamReviewScore && g.steamReviewScore >= 90)
     .sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
@@ -198,19 +170,16 @@ async function main() {
     });
   }
 
-  // Highest Rated
   console.log(`\n  ⭐ HIGHEST RATED:`);
   byReviewScore.slice(0, 5).forEach((g, i) => {
     console.log(`     ${i + 1}. ${g.name} - ${g.steamReviewScore}% (${g.steamReviewCount?.toLocaleString()} reviews)`);
   });
 
-  // Most Popular (by review count)
   console.log(`\n  🔥 MOST REVIEWED (Most Popular):`);
   byReviewCount.slice(0, 5).forEach((g, i) => {
     console.log(`     ${i + 1}. ${g.name} - ${g.steamReviewCount?.toLocaleString()} reviews`);
   });
 
-  // Time vs Quality Analysis
   const avgHours = allGames.filter(g => g.hltbMain).reduce((sum, g) => sum + (g.hltbMain ?? 0), 0) /
                    allGames.filter(g => g.hltbMain).length;
   const avgRating = allGames.reduce((sum, g) => sum + (g.steamReviewScore ?? 0), 0) / allGames.length;
@@ -219,7 +188,6 @@ async function main() {
   console.log(`     Average Main Story Length: ${avgHours.toFixed(1)} hours`);
   console.log(`     Average Steam Rating: ${avgRating.toFixed(1)}%`);
 
-  // Hidden Gems (high value but maybe less known)
   const hiddenGems = [...gamesWithScore]
     .filter(g => (g.steamReviewCount ?? 0) < 200000 && (g.valueScore ?? 0) > 10)
     .sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
@@ -231,7 +199,6 @@ async function main() {
     });
   }
 
-  // Lower Value (for comparison)
   const lowerValue = [...gamesWithScore].sort((a, b) => (a.valueScore ?? 999) - (b.valueScore ?? 999));
   console.log(`\n  ⚠️  LOWER VALUE SCORES (Long time commitment):`);
   lowerValue.slice(0, 3).forEach((g, i) => {

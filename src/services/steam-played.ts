@@ -1,14 +1,8 @@
-/**
- * Steam Played Games Service
- *
- * Fetches games the user has played (has playtime) from Steam Web API.
- * Requires STEAM_API_KEY and STEAM_ID in .env file.
- */
 
 interface OwnedGame {
   appid: number;
   name: string;
-  playtime_forever: number; // minutes
+  playtime_forever: number;  
   playtime_2weeks?: number;
 }
 
@@ -19,13 +13,9 @@ interface GetOwnedGamesResponse {
   };
 }
 
-// In-memory cache for the session
 let playedAppsCache: Set<number> | null = null;
-let ownedGamesCache: Map<number, number> | null = null; // appId -> playtimeMinutes
+let ownedGamesCache: Map<number, number> | null = null;  
 
-/**
- * Fetch games the user has played (any playtime > 0) from Steam Web API.
- */
 export async function fetchPlayedApps(): Promise<Set<number>> {
   const apiKey = process.env.STEAM_API_KEY;
   const steamId = process.env.STEAM_ID;
@@ -57,7 +47,6 @@ export async function fetchPlayedApps(): Promise<Set<number>> {
     return playedAppsCache;
   }
 
-  // Filter to games with any playtime
   const playedGames = data.response.games.filter((g) => g.playtime_forever > 0);
   const playedIds = playedGames.map((g) => g.appid);
 
@@ -69,10 +58,6 @@ export async function fetchPlayedApps(): Promise<Set<number>> {
   return playedAppsCache;
 }
 
-/**
- * Fetch all owned games with their playtime from Steam Web API.
- * Returns a Map of appId -> playtimeMinutes (includes games with 0 playtime).
- */
 export async function fetchOwnedGamesWithPlaytime(): Promise<Map<number, number>> {
   const apiKey = process.env.STEAM_API_KEY;
   const steamId = process.env.STEAM_ID;
@@ -104,7 +89,6 @@ export async function fetchOwnedGamesWithPlaytime(): Promise<Map<number, number>
     return ownedGamesCache;
   }
 
-  // Create map of all owned games (including 0 playtime)
   ownedGamesCache = new Map(
     data.response.games.map((g) => [g.appid, g.playtime_forever])
   );
@@ -116,9 +100,6 @@ export async function fetchOwnedGamesWithPlaytime(): Promise<Map<number, number>
   return ownedGamesCache;
 }
 
-/**
- * Get cached owned games map, or fetch if not loaded.
- */
 export async function getOwnedGamesWithPlaytime(): Promise<Map<number, number>> {
   if (!ownedGamesCache) {
     await fetchOwnedGamesWithPlaytime();
@@ -126,9 +107,6 @@ export async function getOwnedGamesWithPlaytime(): Promise<Map<number, number>> 
   return ownedGamesCache ?? new Map();
 }
 
-/**
- * Check if the user has played a game (has any playtime).
- */
 export async function hasPlayed(appId: number): Promise<boolean> {
   if (!playedAppsCache) {
     await fetchPlayedApps();
@@ -136,16 +114,10 @@ export async function hasPlayed(appId: number): Promise<boolean> {
   return playedAppsCache?.has(appId) ?? false;
 }
 
-/**
- * Get the cached played apps set, or null if not loaded.
- */
 export function getPlayedApps(): Set<number> | null {
   return playedAppsCache;
 }
 
-/**
- * Clear the played apps cache.
- */
 export function clearPlayedCache(): void {
   playedAppsCache = null;
   ownedGamesCache = null;

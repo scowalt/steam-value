@@ -31,7 +31,6 @@ const run = (provider = source()) => refreshGameDeals(client, provider, { now: (
 beforeEach(async () => {
   now = start;
   client = createClient({ url: "file::memory:" });
-  // Use the application's actual Drizzle columns; fixtures don't maintain a second schema.
   const columns = getTableConfig(games).columns.map((column) => {
     const fallback = typeof column.default === "boolean" ? Number(column.default) : typeof column.default === "number" ? column.default : null;
     return `"${column.name}" ${column.getSQLType()}${column.primary ? " PRIMARY KEY" : ""}${fallback !== null ? ` DEFAULT ${fallback}` : ""}`;

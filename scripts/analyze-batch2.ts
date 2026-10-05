@@ -6,9 +6,7 @@ import { getHltbById } from "../src/scrapers/hltb";
 import { calculateValueScore } from "../src/formula";
 import { eq } from "drizzle-orm";
 
-// Batch 2: 100 more popular Steam games (not in batch 1)
 const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: boolean }[] = [
-  // RPGs
   { steamId: 17450, hltbId: 2725, name: "Dragon Age: Origins" },
   { steamId: 230230, hltbId: 12968, name: "Divinity: Original Sin" },
   { steamId: 719040, hltbId: 79532, name: "Wasteland 3" },
@@ -20,7 +18,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 740130, hltbId: 71536, name: "Tales of Arise" },
   { steamId: 1817070, hltbId: 103498, name: "Persona 3 Reload" },
 
-  // Action/Souls-like
   { steamId: 582010, hltbId: 52488, name: "Monster Hunter: World" },
   { steamId: 1446780, hltbId: 79297, name: "Monster Hunter Rise" },
   { steamId: 1325200, hltbId: 71787, name: "Nioh 2" },
@@ -31,7 +28,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 617290, hltbId: 57832, name: "Remnant: From the Ashes" },
   { steamId: 1971870, hltbId: 114328, name: "Metaphor: ReFantazio" },
 
-  // Indie Gems
   { steamId: 1092790, hltbId: 85112, name: "Inscryption" },
   { steamId: 1794680, hltbId: 99277, name: "Vampire Survivors", endless: true },
   { steamId: 553420, hltbId: 57286, name: "Tunic" },
@@ -43,7 +39,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 1621690, hltbId: 95269, name: "Core Keeper", endless: true },
   { steamId: 739630, hltbId: 68498, name: "Phasmophobia", endless: true },
 
-  // Horror
   { steamId: 214490, hltbId: 15491, name: "Alien: Isolation" },
   { steamId: 391720, hltbId: 30095, name: "Layers of Fear" },
   { steamId: 424840, hltbId: 38938, name: "Little Nightmares" },
@@ -53,7 +48,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 1326470, hltbId: 95183, name: "Sons of the Forest", endless: true },
   { steamId: 1562430, hltbId: 103027, name: "Dredge" },
 
-  // Strategy
   { steamId: 779340, hltbId: 59073, name: "Total War: Three Kingdoms" },
   { steamId: 34330, hltbId: 10491, name: "Total War: Shogun 2" },
   { steamId: 236850, hltbId: 3604, name: "Europa Universalis IV", endless: true },
@@ -63,7 +57,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 703080, hltbId: 63579, name: "Planet Zoo", endless: true },
   { steamId: 535930, hltbId: 51556, name: "Two Point Hospital" },
 
-  // Shooters
   { steamId: 397540, hltbId: 57527, name: "Borderlands 3" },
   { steamId: 49520, hltbId: 1274, name: "Borderlands 2" },
   { steamId: 550, hltbId: 5143, name: "Left 4 Dead 2" },
@@ -73,7 +66,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 699130, hltbId: 61305, name: "World War Z" },
   { steamId: 1029690, hltbId: 100269, name: "Sniper Elite 5" },
 
-  // Simulation
   { steamId: 270880, hltbId: 23826, name: "American Truck Simulator" },
   { steamId: 1250410, hltbId: 70936, name: "Microsoft Flight Simulator" },
   { steamId: 1465360, hltbId: 82213, name: "Snowrunner" },
@@ -81,12 +73,10 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 1290000, hltbId: 93085, name: "PowerWash Simulator" },
   { steamId: 621060, hltbId: 51612, name: "PC Building Simulator" },
 
-  // Racing
   { steamId: 690790, hltbId: 58127, name: "Dirt Rally 2.0" },
   { steamId: 244210, hltbId: 16032, name: "Assetto Corsa", endless: true },
   { steamId: 284160, hltbId: 19131, name: "BeamNG.drive", endless: true },
 
-  // Classic/Immersive Sim
   { steamId: 238010, hltbId: 2611, name: "Deus Ex: Human Revolution" },
   { steamId: 337000, hltbId: 26929, name: "Deus Ex: Mankind Divided" },
   { steamId: 480490, hltbId: 42424, name: "Prey (2017)" },
@@ -98,14 +88,12 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 200260, hltbId: 1315, name: "Batman: Arkham City" },
   { steamId: 35140, hltbId: 1313, name: "Batman: Arkham Asylum" },
 
-  // Puzzle
   { steamId: 257510, hltbId: 14635, name: "The Talos Principle" },
   { steamId: 736260, hltbId: 58617, name: "Baba Is You" },
   { steamId: 1049410, hltbId: 72372, name: "Superliminal" },
   { steamId: 219890, hltbId: 776, name: "Antichamber" },
   { steamId: 1703340, hltbId: 9772, name: "Stanley Parable: Ultra Deluxe" },
 
-  // Platformers
   { steamId: 242550, hltbId: 8285, name: "Rayman Legends" },
   { steamId: 418530, hltbId: 71303, name: "Spelunky 2" },
   { steamId: 48000, hltbId: 5455, name: "Limbo" },
@@ -113,7 +101,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 253230, hltbId: 16622, name: "A Hat in Time" },
   { steamId: 607080, hltbId: 58832, name: "Psychonauts 2" },
 
-  // Roguelikes
   { steamId: 881100, hltbId: 62059, name: "Noita" },
   { steamId: 262060, hltbId: 17101, name: "Darkest Dungeon" },
   { steamId: 212680, hltbId: 4352, name: "FTL: Faster Than Light" },
@@ -121,7 +108,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 1253920, hltbId: 83063, name: "Rogue Legacy 2" },
   { steamId: 1649240, hltbId: 93790, name: "Returnal" },
 
-  // Survival
   { steamId: 848450, hltbId: 65029, name: "Subnautica: Below Zero" },
   { steamId: 962130, hltbId: 79832, name: "Grounded" },
   { steamId: 305620, hltbId: 18720, name: "The Long Dark" },
@@ -129,7 +115,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 648800, hltbId: 54082, name: "Raft", endless: true },
   { steamId: 815370, hltbId: 54538, name: "Green Hell" },
 
-  // Multiplayer/Endless
   { steamId: 730, hltbId: 5290, name: "Counter-Strike 2", endless: true },
   { steamId: 570, hltbId: 2838, name: "Dota 2", endless: true },
   { steamId: 440, hltbId: 9950, name: "Team Fortress 2", endless: true },
@@ -138,7 +123,6 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
   { steamId: 238960, hltbId: 8677, name: "Path of Exile", endless: true },
 ];
 
-// Fix: Remove invalid entry
 const GAMES = BATCH2_GAMES.filter(g => typeof g.hltbId === 'number');
 
 async function addGame(steamId: number, hltbId: number, name: string, isEndless: boolean = false) {
@@ -157,7 +141,6 @@ async function addGame(steamId: number, hltbId: number, name: string, isEndless:
     try {
       hltbData = await getHltbById(hltbId);
     } catch {
-      // HLTB fetch failed
     }
 
     const valueScore = calculateValueScore({
@@ -221,7 +204,6 @@ async function main() {
   console.log(`\n${"─".repeat(60)}`);
   console.log(`Summary: ${results.added} added, ${results.exists} existing, ${results.errors} errors`);
 
-  // Show updated totals
   const allGames = await db.query.games.findMany();
   const ranked = allGames.filter(g => g.valueScore !== null && !g.isEndless);
   console.log(`\nTotal games: ${allGames.length} | Ranked: ${ranked.length} | Endless: ${allGames.filter(g => g.isEndless).length}`);

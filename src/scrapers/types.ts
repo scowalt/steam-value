@@ -1,17 +1,17 @@
 export interface SteamData {
   appId: number;
   name: string;
-  reviewScore: number; // 0-100 positive percentage
+  reviewScore: number;  
   reviewCount: number;
 }
 
 export interface HltbData {
   hltbId: number;
   name: string;
-  main: number | null; // hours
-  mainExtra: number | null; // hours
-  completionist: number | null; // hours
-  profileSteam: number | null; // Steam App ID from HLTB (for verification)
+  main: number | null;  
+  mainExtra: number | null;  
+  completionist: number | null;  
+  profileSteam: number | null;  
 }
 
 export interface GameData {

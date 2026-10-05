@@ -13,7 +13,6 @@ export interface ItadOptions {
   retries?: number;
 }
 
-/** Stable ITAD endpoints only. Keys travel in a header and never appear in errors. */
 export class ItadClient {
   private readonly fetcher: FetchRequest;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -44,8 +43,6 @@ export class ItadClient {
   }
 
   async prices(ids: string[], country: string): Promise<Map<string, DealOffer[]>> {
-    // With deals=true ITAD omits games without discounts entirely. Request regular
-    // prices too, so an absent game remains unknown rather than a fresh no-sale claim.
     const fetchedAt = this.now();
     const data = array(await this.request(`/games/prices/v3?country=${country}&deals=false&vouchers=true&capacity=0`, ids));
     const result = new Map<string, DealOffer[]>();
@@ -67,7 +64,6 @@ export class ItadClient {
     const fetchedAt = this.now();
     const games = new Map<string, DealOffer[]>();
     const seen = new Set<number>();
-    // A bounded, complete feed: never publish a partial feed as an empty result.
     for (let offset = 0; offset < 5000; offset += 50) {
       const page = array(await this.request(`/bundles/v1?country=${country}&expired=false&mature=true&limit=50&offset=${offset}`));
       for (const value of page) {
@@ -117,7 +113,6 @@ export class ItadClient {
         const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - this.now() * 1000;
         if (Number.isFinite(delay)) wait = Math.max(wait, delay);
       }
-      // Fail instead of sleeping past our refresh lease, never shorten Retry-After.
       if (wait > 120_000) throw new Error("ITAD requested a long retry delay; next scheduled run will retry");
       await this.sleep(wait);
     }
@@ -157,7 +152,6 @@ function bundleOffers(bundle: JsonObject, fetchedAt: number): [string, DealOffer
     const tier = object(value);
     if (typeof tier.addon !== "boolean") throw new Error("Invalid ITAD bundle tier");
     const price = tier.price === null ? null : money(tier.price);
-    // Don't relabel a non-USD tier. Unknown prices still permit honest bundle links.
     if (tier.price !== null && price === null) continue;
     const ambiguous = tier.addon || /build your own|pick.?and.?mix|choose/i.test(`${title} ${note ?? ""}`);
     const offer: DealOffer = {

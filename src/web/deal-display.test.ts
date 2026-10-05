@@ -29,7 +29,6 @@ function game(id: number, gameDeals = deals()) {
   };
 }
 
-// These test normalized display semantics, not the backend's ITAD parser/eligibility rules.
 describe("deal display", () => {
   test("uses the earliest normalized deadline and expires at the exact boundary", () => {
     const data = deals({ offers: [offer({ validUntil: now }), offer({ id: "later", validUntil: now + 1 })] });
@@ -87,7 +86,6 @@ describe("deal display", () => {
   });
 });
 
-// Browser smoke tests use only in-process route interception: no server, real API or secrets.
 describe("mocked frontend behavior", () => {
   let browser: Browser;
   let html: string;
@@ -219,7 +217,6 @@ describe("mocked frontend behavior", () => {
       }
     }, async (page) => {
       await page.waitForSelector("#games-list tr");
-      // Model a response already past the network/abort boundary, testing the generation guard.
       await page.evaluate(() => {
         window.fetch = new Proxy(window.fetch, {
           apply(target, receiver, [input, init]) {
@@ -234,7 +231,6 @@ describe("mocked frontend behavior", () => {
       const response = page.waitForResponse((res) => res.url().includes("onSale=true"));
       release!();
       await response;
-      // Let the stale JSON continuation finish before asserting it didn't append or replace rows.
       await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
       expect(await page.locator("#games-list tr").count()).toBe(1);
       expect(await page.locator("#games-list .game-name > a").innerText()).toBe("Game 1");
@@ -289,7 +285,6 @@ describe("mocked frontend behavior", () => {
       await page.locator("#on-sale").check();
       await page.waitForSelector("#games-list tr");
       expect(calls).toBe(2);
-      // Advance wall time without firing the interval, like a suspended/background tab.
       await page.clock.setSystemTime((now + 20) * 1000);
       await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
       await page.locator("#games-empty").waitFor();

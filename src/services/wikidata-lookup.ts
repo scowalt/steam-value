@@ -1,6 +1,3 @@
-// Wikidata Lookup Service
-// Provides Steam -> HLTB mappings from Wikidata's structured data
-// Properties: P1733 (Steam App ID), P2816 (HLTB ID)
 
 const SPARQL_ENDPOINT = "https://query.wikidata.org/sparql";
 const USER_AGENT = "SteamValueBot/1.0 (https://github.com/steam-value)";
@@ -12,12 +9,8 @@ export interface WikidataCandidate {
   source: "wikidata";
 }
 
-// Cache for Wikidata lookups (single session)
 const wikidataCache = new Map<number, WikidataCandidate | null>();
 
-/**
- * Query Wikidata SPARQL endpoint
- */
 async function querySparql<T>(sparql: string): Promise<T> {
   const url = new URL(SPARQL_ENDPOINT);
   url.searchParams.set("query", sparql);
@@ -37,13 +30,9 @@ async function querySparql<T>(sparql: string): Promise<T> {
   return response.json();
 }
 
-/**
- * Look up HLTB ID for a Steam App ID via Wikidata
- */
 export async function getWikidataCandidate(
   steamAppId: number
 ): Promise<WikidataCandidate | null> {
-  // Check cache first
   if (wikidataCache.has(steamAppId)) {
     return wikidataCache.get(steamAppId) ?? null;
   }
@@ -83,16 +72,11 @@ export async function getWikidataCandidate(
   }
 }
 
-/**
- * Batch lookup multiple Steam IDs (more efficient)
- * Limited to 50 at a time to avoid query timeouts
- */
 export async function getWikidataCandidatesBatch(
   steamAppIds: number[]
 ): Promise<Map<number, WikidataCandidate>> {
   const results = new Map<number, WikidataCandidate>();
 
-  // Process in batches of 50
   const batchSize = 50;
   for (let i = 0; i < steamAppIds.length; i += batchSize) {
     const batch = steamAppIds.slice(i, i + batchSize);
@@ -137,10 +121,6 @@ export async function getWikidataCandidatesBatch(
   return results;
 }
 
-/**
- * Download all Wikidata Steam-HLTB mappings
- * Useful for building a local cache file
- */
 export async function downloadAllWikidataMappings(): Promise<WikidataCandidate[]> {
   console.log("[Wikidata] Downloading all Steam-HLTB mappings...");
 

@@ -9,7 +9,6 @@ import { eq } from "drizzle-orm";
 const batchNum = parseInt(process.argv[2] ?? "1");
 
 const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: boolean }[][] = [
-  // Batch 1: RPGs
   [
     { steamId: 17450, hltbId: 2725, name: "Dragon Age: Origins" },
     { steamId: 230230, hltbId: 12968, name: "Divinity: Original Sin" },
@@ -22,7 +21,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 740130, hltbId: 71536, name: "Tales of Arise" },
     { steamId: 1817070, hltbId: 103498, name: "Persona 3 Reload" },
   ],
-  // Batch 2: Action
   [
     { steamId: 582010, hltbId: 52488, name: "Monster Hunter: World" },
     { steamId: 1446780, hltbId: 79297, name: "Monster Hunter Rise" },
@@ -34,7 +32,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 617290, hltbId: 57832, name: "Remnant: From Ashes" },
     { steamId: 1971870, hltbId: 114328, name: "Metaphor: ReFantazio" },
   ],
-  // Batch 3: Indie
   [
     { steamId: 1092790, hltbId: 85112, name: "Inscryption" },
     { steamId: 1794680, hltbId: 99277, name: "Vampire Survivors", endless: true },
@@ -46,7 +43,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 1366540, hltbId: 82685, name: "Dyson Sphere Program", endless: true },
     { steamId: 739630, hltbId: 68498, name: "Phasmophobia", endless: true },
   ],
-  // Batch 4: Horror
   [
     { steamId: 214490, hltbId: 15491, name: "Alien: Isolation" },
     { steamId: 391720, hltbId: 30095, name: "Layers of Fear" },
@@ -57,7 +53,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 1326470, hltbId: 95183, name: "Sons of the Forest", endless: true },
     { steamId: 1562430, hltbId: 103027, name: "Dredge" },
   ],
-  // Batch 5: Strategy
   [
     { steamId: 779340, hltbId: 59073, name: "Total War: Three Kingdoms" },
     { steamId: 34330, hltbId: 10491, name: "Total War: Shogun 2" },
@@ -66,7 +61,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 255710, hltbId: 12631, name: "Cities: Skylines", endless: true },
     { steamId: 535930, hltbId: 51556, name: "Two Point Hospital" },
   ],
-  // Batch 6: Shooters
   [
     { steamId: 397540, hltbId: 57527, name: "Borderlands 3" },
     { steamId: 49520, hltbId: 1274, name: "Borderlands 2" },
@@ -76,7 +70,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 594650, hltbId: 46680, name: "Hunt: Showdown", endless: true },
     { steamId: 1029690, hltbId: 100269, name: "Sniper Elite 5" },
   ],
-  // Batch 7: Simulation
   [
     { steamId: 270880, hltbId: 23826, name: "American Truck Sim" },
     { steamId: 1250410, hltbId: 70936, name: "MS Flight Sim" },
@@ -86,7 +79,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 621060, hltbId: 51612, name: "PC Building Sim" },
     { steamId: 690790, hltbId: 58127, name: "Dirt Rally 2.0" },
   ],
-  // Batch 8: Immersive Sims
   [
     { steamId: 238010, hltbId: 2611, name: "Deus Ex: HR" },
     { steamId: 337000, hltbId: 26929, name: "Deus Ex: MD" },
@@ -96,7 +88,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 203160, hltbId: 10477, name: "Tomb Raider 2013" },
     { steamId: 391220, hltbId: 27394, name: "Rise of Tomb Raider" },
   ],
-  // Batch 9: Batman + Puzzle
   [
     { steamId: 208650, hltbId: 1318, name: "Batman: Arkham Knight" },
     { steamId: 200260, hltbId: 1315, name: "Batman: Arkham City" },
@@ -106,7 +97,6 @@ const ALL_GAMES: { steamId: number; hltbId: number; name: string; endless?: bool
     { steamId: 1049410, hltbId: 72372, name: "Superliminal" },
     { steamId: 219890, hltbId: 776, name: "Antichamber" },
   ],
-  // Batch 10: Platformers + Roguelikes
   [
     { steamId: 242550, hltbId: 8285, name: "Rayman Legends" },
     { steamId: 418530, hltbId: 71303, name: "Spelunky 2" },

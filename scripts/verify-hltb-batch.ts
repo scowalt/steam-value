@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-// Batch HLTB Verification Script
-// Verifies HLTB mappings for all games in the database
 
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
@@ -17,8 +15,8 @@ interface VerificationStats {
   errors: number;
 }
 
-const RATE_LIMIT_MS = 1000; // 1 request per second
-const CHECKPOINT_INTERVAL = 10; // Save progress every N games
+const RATE_LIMIT_MS = 1000;  
+const CHECKPOINT_INTERVAL = 10;  
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -54,7 +52,6 @@ async function main() {
     console.log("DRY RUN MODE - No changes will be made\n");
   }
 
-  // Get games without HLTB data
   const gamesToVerify = await db.query.games.findMany({
     where: and(
       isNull(games.hltbId),
@@ -89,21 +86,18 @@ async function main() {
     const game = gamesToVerify[i];
     stats.total++;
 
-    // Progress indicator
     const progress = `[${i + 1}/${totalGames}]`;
     process.stdout.write(`${progress} ${game.name}... `);
 
     try {
       const result = await verifyHltbMapping(game.steamAppId, game.name);
 
-      // Track results
       statusCounts[result.status].push({ steamAppId: game.steamAppId, name: game.name });
 
       switch (result.status) {
         case "verified":
           stats.verified++;
           if (result.hltbData && !dryRun) {
-            // Update database with verified HLTB data
             await db
               .update(games)
               .set({
@@ -143,12 +137,10 @@ async function main() {
       console.log(`ERROR: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
 
-    // Rate limiting
     if (i < totalGames - 1) {
       await sleep(RATE_LIMIT_MS);
     }
 
-    // Checkpoint progress
     if ((i + 1) % CHECKPOINT_INTERVAL === 0) {
       console.log(`\n--- Checkpoint: ${i + 1}/${totalGames} processed ---`);
       console.log(`  Verified: ${stats.verified}`);
@@ -159,7 +151,6 @@ async function main() {
     }
   }
 
-  // Final summary
   console.log("\n=== VERIFICATION COMPLETE ===\n");
   console.log(`Total processed: ${stats.total}`);
   console.log(`  \u2713 Verified:      ${stats.verified} (${((stats.verified / stats.total) * 100).toFixed(1)}%)`);
@@ -168,7 +159,6 @@ async function main() {
   console.log(`  - No candidate:  ${stats.noCandidate}`);
   console.log(`  ! Errors:        ${stats.errors}`);
 
-  // List games needing attention
   if (statusCounts.wrong_mapping.length > 0) {
     console.log("\n--- Games with WRONG MAPPING (need manual HLTB ID) ---");
     statusCounts.wrong_mapping.forEach((g) => {

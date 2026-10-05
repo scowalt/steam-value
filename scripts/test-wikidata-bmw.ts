@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-// Check Wikidata for Black Myth Wukong and count total mappings
 
 const SPARQL_ENDPOINT = "https://query.wikidata.org/sparql";
 
@@ -23,7 +22,6 @@ async function query(sparql: string) {
 }
 
 async function main() {
-  // Count total mappings
   const countQuery = `
     SELECT (COUNT(*) as ?count) WHERE {
       ?game wdt:P31 wd:Q7889;
@@ -35,7 +33,6 @@ async function main() {
   const countData = await query(countQuery);
   console.log("Total Steam-HLTB mappings in Wikidata:", countData.results.bindings[0].count.value);
 
-  // Search for Black Myth Wukong by Steam ID (2358720)
   const bmwQuery = `
     SELECT ?game ?gameLabel ?steamId ?hltbId WHERE {
       ?game wdt:P1733 "2358720";
@@ -55,7 +52,6 @@ async function main() {
   } else {
     console.log("Not found with HLTB mapping");
 
-    // Try just finding the game
     const gameQuery = `
       SELECT ?game ?gameLabel ?steamId WHERE {
         ?game wdt:P1733 "2358720".
@@ -68,8 +64,7 @@ async function main() {
     }
   }
 
-  // Check some other missing games
-  const missingIds = ["739630", "892970", "990080", "1687950"]; // Phasmophobia, Valheim, Hogwarts, Persona 5
+  const missingIds = ["739630", "892970", "990080", "1687950"];  
   console.log("\nChecking other missing games:");
 
   for (const steamId of missingIds) {

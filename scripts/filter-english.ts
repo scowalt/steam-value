@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-// Filter out games that don't support English language
 
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
@@ -29,7 +28,6 @@ async function findNonEnglishGames(): Promise<NonEnglishGame[]> {
         languages,
       });
     } else if (englishSupport === null) {
-      // Neither steamdb nor Steam API could provide language info
       console.log(`  [UNKNOWN] ${game.name} (Steam ${game.steamAppId}) - could not verify, keeping`);
     }
   }

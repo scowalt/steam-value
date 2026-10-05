@@ -1,9 +1,3 @@
-/**
- * Steam Wishlist Service
- *
- * Fetches and caches the user's wishlist from Steam.
- * Requires STEAM_LOGIN_SECURE cookie in .env file.
- */
 
 interface SteamUserData {
   rgWishlist: number[];
@@ -11,9 +5,6 @@ interface SteamUserData {
 
 let wishlistCache: Set<number> | null = null;
 
-/**
- * Fetch the user's wishlist from Steam's dynamicstore endpoint.
- */
 export async function fetchWishlist(): Promise<Set<number>> {
   const cookie = process.env.STEAM_LOGIN_SECURE;
 
@@ -51,9 +42,6 @@ export async function fetchWishlist(): Promise<Set<number>> {
   return wishlistCache;
 }
 
-/**
- * Check if an app is on the user's wishlist.
- */
 export async function isOnWishlist(appId: number): Promise<boolean> {
   if (!wishlistCache) {
     await fetchWishlist();
@@ -61,9 +49,6 @@ export async function isOnWishlist(appId: number): Promise<boolean> {
   return wishlistCache?.has(appId) ?? false;
 }
 
-/**
- * Get the cached wishlist set.
- */
 export function getWishlist(): Set<number> | null {
   return wishlistCache;
 }

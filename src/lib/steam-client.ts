@@ -1,27 +1,15 @@
-/**
- * Steam API Client with Rate Limiting, Retry, and Caching
- *
- * Provides a centralized client for all Steam API calls with:
- * - Rate limiting (sequential requests with configurable delay)
- * - Retry with exponential backoff
- * - In-memory response caching
- */
 
 export interface SteamData {
   appId: number;
   name: string;
-  reviewScore: number; // 0-100 positive percentage
+  reviewScore: number;  
   reviewCount: number;
 }
 
 export interface SteamClientConfig {
-  /** Minimum delay between requests in ms (default: 1500) */
   minDelayMs?: number;
-  /** Maximum retry attempts (default: 3) */
   maxRetries?: number;
-  /** Cache TTL in ms (default: 300000 = 5 minutes) */
   cacheTtlMs?: number;
-  /** Log rate limit events and retries (default: false) */
   verbose?: boolean;
 }
 
@@ -44,7 +32,6 @@ export interface GameModes {
   isMMO: boolean;
 }
 
-// Steam Category IDs for game modes
 const CATEGORY_IDS = {
   SINGLE_PLAYER: 2,
   MULTIPLAYER: 1,
@@ -53,14 +40,13 @@ const CATEGORY_IDS = {
   LOCAL_CO_OP: 37,
   ONLINE_MULTIPLAYER: 36,
   PVP: 49,
-  LOCAL_PVP: 39, // Shared/Split Screen PvP
+  LOCAL_PVP: 39,  
   CROSS_PLATFORM: 27,
   MMO: 20,
   FULL_CONTROLLER: 28,
   PARTIAL_CONTROLLER: 18,
 } as const;
 
-// Steam API response types
 interface SteamReviewsResponse {
   success: number;
   query_summary: {
@@ -87,12 +73,8 @@ interface SteamAppDetailsResponse {
   };
 }
 
-// Simple sleep utility
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Rate limiter that enforces minimum delay between requests
- */
 class RateLimiter {
   private lastRequestTime = 0;
   private queue: Array<{ resolve: () => void }> = [];
@@ -129,9 +111,6 @@ class RateLimiter {
   }
 }
 
-/**
- * Simple in-memory cache with TTL
- */
 class ResponseCache<T> {
   private cache = new Map<string, { value: T; expiresAt: number }>();
 
@@ -161,9 +140,6 @@ class ResponseCache<T> {
   }
 }
 
-/**
- * Steam API Client with built-in rate limiting, retry, and caching
- */
 export class SteamClient {
   private rateLimiter: RateLimiter;
   private cache = new ResponseCache<unknown>();
@@ -180,9 +156,6 @@ export class SteamClient {
     this.rateLimiter = new RateLimiter(this.config.minDelayMs);
   }
 
-  /**
-   * Fetch with rate limiting and retry logic
-   */
   private async fetchWithRetry<T>(url: string): Promise<T> {
     await this.rateLimiter.acquire();
 
@@ -196,7 +169,7 @@ export class SteamClient {
         if (this.isRateLimited(response, data)) {
           if (attempt < this.config.maxRetries) {
             this.stats.retries++;
-            const backoff = 2000 * Math.pow(2, attempt); // 2s, 4s, 8s
+            const backoff = 2000 * Math.pow(2, attempt);  
             if (this.config.verbose) {
               console.warn(
                 `[SteamClient] Rate limited, retry ${attempt + 1}/${this.config.maxRetries} in ${backoff}ms...`
@@ -228,27 +201,18 @@ export class SteamClient {
     throw new Error("Max retries exceeded");
   }
 
-  /**
-   * Detect Steam rate limiting (can be 429, null response, or success: false)
-   */
   private isRateLimited(response: Response, data: unknown): boolean {
     if (response.status === 429) return true;
     if (data === null) return true;
     return false;
   }
 
-  /**
-   * Check if an error is retryable (network errors, 5xx, etc.)
-   */
   private isRetryableError(error: unknown): boolean {
-    if (error instanceof TypeError) return true; // Network errors
+    if (error instanceof TypeError) return true;  
     if (error instanceof Error && error.message.includes("fetch")) return true;
     return false;
   }
 
-  /**
-   * Fetch Steam data for a game (reviews + details)
-   */
   async fetchSteamData(appId: number): Promise<SteamData> {
     const cacheKey = `steam:${appId}`;
     const cached = this.cache.get(cacheKey) as SteamData | undefined;
@@ -257,7 +221,6 @@ export class SteamClient {
       return cached;
     }
 
-    // Fetch reviews
     const reviewsUrl = `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all`;
     const reviewsData = await this.fetchWithRetry<SteamReviewsResponse>(reviewsUrl);
 
@@ -269,7 +232,6 @@ export class SteamClient {
     const reviewScore =
       total_reviews > 0 ? Math.round((total_positive / total_reviews) * 100) : 0;
 
-    // Fetch details
     const detailsUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
     const detailsData = await this.fetchWithRetry<SteamAppDetailsResponse>(detailsUrl);
     const appDetails = detailsData[appId.toString()];
@@ -289,9 +251,6 @@ export class SteamClient {
     return result;
   }
 
-  /**
-   * Check if a Steam app is a game (not DLC, video, software, etc.)
-   */
   async isGame(appId: number): Promise<boolean> {
     const cacheKey = `isGame:${appId}`;
     const cached = this.cache.get(cacheKey) as boolean | undefined;
@@ -319,9 +278,6 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Get supported languages for a Steam app
-   */
   async getLanguages(appId: number): Promise<string[] | null> {
     const cacheKey = `languages:${appId}`;
     const cached = this.cache.get(cacheKey) as string[] | null | undefined;
@@ -341,12 +297,10 @@ export class SteamClient {
         return null;
       }
 
-      // Parse languages from HTML string
-      // Format: "English<strong>*</strong>, French, German<br>..."
       const langString = appData.data.supported_languages
-        .replace(/<br\s*\/?>/gi, ",") // Replace <br> with comma first
-        .replace(/<[^>]*>/g, "") // Remove other HTML tags
-        .replace(/\s+/g, " "); // Normalize whitespace
+        .replace(/<br\s*\/?>/gi, ",")  
+        .replace(/<[^>]*>/g, "")  
+        .replace(/\s+/g, " ");  
 
       const languages = langString
         .split(",")
@@ -361,9 +315,6 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Check if a game has English support
-   */
   async hasEnglishSupport(appId: number): Promise<boolean | null> {
     const languages = await this.getLanguages(appId);
     if (languages === null) return null;
@@ -372,9 +323,6 @@ export class SteamClient {
     );
   }
 
-  /**
-   * Check if a game is in Early Access
-   */
   async isEarlyAccess(appId: number): Promise<boolean> {
     const cacheKey = `earlyAccess:${appId}`;
     const cached = this.cache.get(cacheKey) as boolean | undefined;
@@ -394,7 +342,6 @@ export class SteamClient {
         return false;
       }
 
-      // Early Access has genre ID "70"
       const result = appData.data.genres.some((g) => g.id === "70");
       this.cache.set(cacheKey, result, this.config.cacheTtlMs);
       return result;
@@ -404,10 +351,6 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Get controller support level for a game
-   * Returns "full", "partial", or null (no support)
-   */
   async getControllerSupport(appId: number): Promise<"full" | "partial" | null> {
     const cacheKey = `controller:${appId}`;
     const cached = this.cache.get(cacheKey) as "full" | "partial" | null | undefined;
@@ -427,7 +370,6 @@ export class SteamClient {
         return null;
       }
 
-      // Category 28 = Full controller support, 18 = Partial
       const categories = appData.data.categories;
       let result: "full" | "partial" | null = null;
 
@@ -445,10 +387,6 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Get release date for a game
-   * Returns ISO date string "YYYY-MM-DD" or null
-   */
   async getReleaseDate(appId: number): Promise<string | null> {
     const cacheKey = `releaseDate:${appId}`;
     const cached = this.cache.get(cacheKey) as string | null | undefined;
@@ -474,7 +412,6 @@ export class SteamClient {
         return null;
       }
 
-      // Parse Steam's date format (e.g., "Nov 16, 2004" or "16 Nov, 2004")
       const parsed = this.parseSteamDate(date);
       this.cache.set(cacheKey, parsed, this.config.cacheTtlMs);
       return parsed;
@@ -484,12 +421,8 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Parse Steam's date format into ISO date string
-   */
   private parseSteamDate(dateStr: string): string | null {
     try {
-      // Try parsing with Date constructor (handles "Nov 16, 2004" etc.)
       const date = new Date(dateStr);
       if (isNaN(date.getTime())) return null;
       return date.toISOString().split("T")[0];
@@ -498,9 +431,6 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Get game modes (single-player, multiplayer, co-op, etc.)
-   */
   async getGameModes(appId: number): Promise<GameModes> {
     const cacheKey = `gameModes:${appId}`;
     const cached = this.cache.get(cacheKey) as GameModes | undefined;
@@ -557,9 +487,6 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Get controller support level for a game
-   */
   async getControllerSupport(appId: number): Promise<"full" | "partial" | null> {
     const cacheKey = `controller:${appId}`;
     const cached = this.cache.get(cacheKey) as "full" | "partial" | null | undefined;
@@ -597,10 +524,6 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Get tags (genres + categories) for a game
-   * Returns a deduplicated array of tag strings, or null if unavailable
-   */
   async getTags(appId: number): Promise<string[] | null> {
     const cacheKey = `tags:${appId}`;
     const cached = this.cache.get(cacheKey) as string[] | null | undefined;
@@ -622,21 +545,18 @@ export class SteamClient {
 
       const tags: string[] = [];
 
-      // Add genres (e.g., "Action", "Strategy", "Early Access")
       if (appData.data.genres) {
         for (const genre of appData.data.genres) {
           tags.push(genre.description);
         }
       }
 
-      // Add categories (e.g., "Single-player", "Multi-player", "Co-op")
       if (appData.data.categories) {
         for (const category of appData.data.categories) {
           tags.push(category.description);
         }
       }
 
-      // Deduplicate
       const uniqueTags = [...new Set(tags)];
 
       this.cache.set(cacheKey, uniqueTags, this.config.cacheTtlMs);
@@ -647,32 +567,21 @@ export class SteamClient {
     }
   }
 
-  /**
-   * Get client statistics
-   */
   getStats(): SteamClientStats {
     return { ...this.stats };
   }
 
-  /**
-   * Clear the response cache
-   */
   clearCache(): void {
     this.cache.clear();
   }
 
-  /**
-   * Reset statistics
-   */
   resetStats(): void {
     this.stats = { requests: 0, cacheHits: 0, retries: 0 };
   }
 }
 
-// Default singleton instance
 export const steam = new SteamClient();
 
-// Backward-compatible function exports
 export const fetchSteamData = (appId: number) => steam.fetchSteamData(appId);
 export const isGame = (appId: number) => steam.isGame(appId);
 export const isEarlyAccess = (appId: number) => steam.isEarlyAccess(appId);

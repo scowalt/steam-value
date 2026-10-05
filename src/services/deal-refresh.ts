@@ -16,7 +16,6 @@ const LEASE_SECONDS = 15 * 60;
 const MAPPING_MAX_AGE = 7 * 24 * 60 * 60;
 const BATCH_SIZE = 200;
 
-/** Independently refreshes public offers; never writes games or Steam Status. */
 export async function refreshGameDeals(client: Client, source: DealSource, options: RefreshOptions = {}) {
   const now = options.now ?? unixNow;
   await ensureDealTables(client);
@@ -125,7 +124,6 @@ export async function refreshGameDeals(client: Client, source: DealSource, optio
     if (result.rowsAffected !== 1) throw new Error("Offer refresh lost completion lease");
     return { skipped: false, gamesChecked: checked, missingPrices, unmapped };
   } catch (error) {
-    // Only controlled messages: API transport deliberately never includes response bodies or keys.
     const message = error instanceof Error ? error.message : "Offer refresh failed";
     await client.execute({
       sql: "UPDATE deal_refresh_state SET last_error=?, games_checked=?, lock_token=NULL, lock_expires_at=NULL WHERE country=? AND lock_token=?",

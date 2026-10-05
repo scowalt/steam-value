@@ -1,7 +1,4 @@
 #!/usr/bin/env bun
-/**
- * Hydrate game modes for all games in the database.
- */
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";
@@ -14,7 +11,6 @@ async function main() {
   let processed = 0;
   let updated = 0;
 
-  // Stats
   let singlePlayer = 0;
   let multiplayer = 0;
   let coOp = 0;
@@ -28,7 +24,6 @@ async function main() {
 
     const modes = await steam.getGameModes(game.steamAppId);
 
-    // Check if anything needs updating
     const needsUpdate =
       modes.hasSinglePlayer !== game.hasSinglePlayer ||
       modes.hasMultiplayer !== game.hasMultiplayer ||
@@ -60,7 +55,6 @@ async function main() {
 
       updated++;
 
-      // Log interesting changes
       const tags = [];
       if (modes.hasSinglePlayer) tags.push("SP");
       if (modes.hasMultiplayer) tags.push("MP");
@@ -75,7 +69,6 @@ async function main() {
       }
     }
 
-    // Collect stats
     if (modes.hasSinglePlayer) singlePlayer++;
     if (modes.hasMultiplayer) multiplayer++;
     if (modes.hasCoOp) coOp++;

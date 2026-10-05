@@ -1,10 +1,4 @@
 #!/usr/bin/env bun
-/**
- * External Steam Status refresh fallback.
- *
- * Cloudflare Worker cron is the primary daily refresh path. Keep this script for
- * manual/admin runs from a machine that has Doppler access.
- */
 import { createClient } from "@libsql/client";
 import { syncSteamStatus } from "../src/services/steam-status-sync";
 

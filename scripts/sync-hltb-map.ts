@@ -1,9 +1,6 @@
 #!/usr/bin/env bun
 
-// Downloads steamdb.json from leinstay/steamdb and extracts Steam-to-HLTB mappings
-// Source: https://github.com/leinstay/steamdb
 
-// Use LFS media URL for the actual file content
 const STEAMDB_URL = "https://media.githubusercontent.com/media/leinstay/steamdb/main/steamdb.json";
 const OUTPUT_PATH = "./src/data/steam-hltb-map.json";
 
@@ -39,14 +36,12 @@ async function main() {
   const entries = Object.entries(data);
   console.log(`Downloaded ${entries.length} games`);
 
-  // Extract HLTB mappings
   const mappings: HltbMapping[] = [];
   let withHltb = 0;
 
   for (const [steamAppId, entry] of entries) {
     if (!entry.hltb_url) continue;
 
-    // Extract HLTB ID from URL like "https://howlongtobeat.com/game/12345"
     const match = entry.hltb_url.match(/game\/(\d+)/);
     if (!match) continue;
 
@@ -65,22 +60,18 @@ async function main() {
 
   console.log(`Found ${withHltb} games with HLTB mappings`);
 
-  // Sort by steamAppId for binary search
   mappings.sort((a, b) => a.steamAppId - b.steamAppId);
 
-  // Save to file
   await Bun.write(OUTPUT_PATH, JSON.stringify(mappings, null, 2));
   console.log(`Saved to ${OUTPUT_PATH}`);
 
-  // Show some stats
   const withTimes = mappings.filter(m => m.hltbSingle !== null);
   console.log(`\nStats:`);
   console.log(`  Total mappings: ${mappings.length}`);
   console.log(`  With playtime data: ${withTimes.length}`);
 
-  // Sample some entries
   console.log(`\nSample entries:`);
-  const samples = [292030, 413150, 289070, 620]; // Witcher 3, Stardew, Civ 6, Portal 2
+  const samples = [292030, 413150, 289070, 620];  
   for (const steamId of samples) {
     const m = mappings.find(m => m.steamAppId === steamId);
     if (m) {

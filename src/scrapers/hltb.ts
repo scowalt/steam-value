@@ -18,7 +18,7 @@ interface HltbGameData {
   comp_main: number;
   comp_plus: number;
   comp_100: number;
-  profile_steam: number; // Steam App ID (0 if not linked)
+  profile_steam: number;  
 }
 
 interface NextData {
@@ -33,10 +33,6 @@ interface NextData {
   };
 }
 
-/**
- * Fetch HLTB data by scraping the game page directly.
- * This works when you know the HLTB game ID.
- */
 export async function getHltbById(hltbId: number): Promise<HltbData | null> {
   try {
     const url = `${HLTB_BASE_URL}/game/${hltbId}`;
@@ -54,7 +50,6 @@ export async function getHltbById(hltbId: number): Promise<HltbData | null> {
 
     const html = await response.text();
 
-    // Extract __NEXT_DATA__ JSON from the page
     const nextDataMatch = html.match(
       /<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/
     );
@@ -69,7 +64,6 @@ export async function getHltbById(hltbId: number): Promise<HltbData | null> {
       throw new Error("No game data found in page");
     }
 
-    // Times are in seconds, convert to hours
     return {
       hltbId: gameData.game_id,
       name: gameData.game_name,
@@ -84,19 +78,7 @@ export async function getHltbById(hltbId: number): Promise<HltbData | null> {
   }
 }
 
-/**
- * Search HLTB by game name.
- * Note: The HLTB API blocks automated requests. This function will return null
- * and suggest using getHltbById() with a known HLTB game ID instead.
- *
- * You can find the HLTB ID by:
- * 1. Searching on howlongtobeat.com
- * 2. Looking at the URL: howlongtobeat.com/game/XXXXX
- * 3. The XXXXX is the HLTB ID
- */
 export async function searchHltb(gameName: string): Promise<HltbData | null> {
-  // HLTB API blocks automated requests with 404s
-  // Return null and guide user to provide HLTB ID manually
   console.warn(
     `HLTB search is not available (API blocked). To add HLTB data, find the game on howlongtobeat.com and use the --hltb-id flag.`
   );
@@ -106,11 +88,6 @@ export async function searchHltb(gameName: string): Promise<HltbData | null> {
   return null;
 }
 
-/**
- * Try to find HLTB data for a game.
- * If hltbId is provided, fetch directly from the game page.
- * Otherwise, return null (search API is blocked).
- */
 export async function fetchHltbData(
   gameName: string,
   hltbId?: number
