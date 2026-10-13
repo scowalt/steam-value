@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "src/db/migrations*.ts",
+    "src/db/testing*.ts",
+    "scripts/db-migrate*.ts"
+  ]
+}
