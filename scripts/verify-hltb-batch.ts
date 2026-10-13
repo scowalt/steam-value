@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { db } from "../src/db/client";
+import { readAllGames, recoverableManualError, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { verifyHltbMapping, type VerificationStatus } from "../src/services/hltb-mapping";
 import { eq, isNull, and } from "drizzle-orm";
@@ -27,7 +28,7 @@ function parseArgs() {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--limit" && args[i + 1]) {
-      limit = parseInt(args[i + 1], 10);
+      limit = parseInt(args[i + 1]!, 10);
       i++;
     } else if (arg === "--dry-run") {
       dryRun = true;
@@ -52,7 +53,7 @@ async function main() {
     console.log("DRY RUN MODE - No changes will be made\n");
   }
 
-  const gamesToVerify = await db.query.games.findMany({
+  const gamesToVerify = await readAllGames(db, {
     where: and(
       isNull(games.hltbId),
       eq(games.isEndless, false)
@@ -83,7 +84,7 @@ async function main() {
   };
 
   for (let i = 0; i < totalGames; i++) {
-    const game = gamesToVerify[i];
+    const game = gamesToVerify[i]!;
     stats.total++;
 
     const progress = `[${i + 1}/${totalGames}]`;
@@ -98,15 +99,12 @@ async function main() {
         case "verified":
           stats.verified++;
           if (result.hltbData && !dryRun) {
-            await db
-              .update(games)
-              .set({
+            await updateGame(db, eq(games.steamAppId, game.steamAppId), {
                 hltbId: result.hltbData.hltbId,
                 hltbMain: result.hltbData.main,
                 hltbMainExtra: result.hltbData.mainExtra,
                 hltbCompletionist: result.hltbData.completionist,
-              })
-              .where(eq(games.steamAppId, game.steamAppId));
+              });
           }
           console.log(`\u2713 VERIFIED (${result.hltbData?.main?.toFixed(1) ?? "N/A"}h)`);
           break;
@@ -133,8 +131,9 @@ async function main() {
           break;
       }
     } catch (error) {
+      const failure = recoverableManualError(error);
       stats.errors++;
-      console.log(`ERROR: ${error instanceof Error ? error.message : "Unknown error"}`);
+      console.log(`ERROR: ${failure.message}`);
     }
 
     if (i < totalGames - 1) {
@@ -178,7 +177,4 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("Fatal error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

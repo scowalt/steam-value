@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames } from "../src/db/manual";
 import { games } from "../src/db/schema";
 
-const allGames = await db.query.games.findMany();
+const allGames = await readAllGames(db);
 const ranked = allGames.filter(g => g.valueScore !== null && !g.isEndless);
 const sorted = ranked.sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
 

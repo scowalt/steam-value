@@ -2,7 +2,8 @@
 
 import { db } from "../src/db/client";
 import { games } from "../src/db/schema";
-import { inArray } from "drizzle-orm";
+import { asc } from "drizzle-orm";
+import { deleteGames, readAllRows, reportManualError } from "../src/db/manual";
 import { fetchIgnoredApps } from "../src/services/steam-ignored";
 
 async function main() {
@@ -15,13 +16,13 @@ async function main() {
 
   console.log(`Found ${ignored.size} ignored games on Steam\n`);
 
-  const allGames = await db
+  const allGames = await readAllRows(({ limit, offset }) => db
     .select({
       id: games.id,
       steamAppId: games.steamAppId,
       name: games.name,
     })
-    .from(games);
+    .from(games).orderBy(asc(games.id)).limit(limit).offset(offset));
 
   const toRemove = allGames.filter((g) => ignored.has(g.steamAppId));
 
@@ -34,12 +35,9 @@ async function main() {
   toRemove.forEach((g) => console.log(`  - ${g.name} (${g.steamAppId})`));
 
   const ids = toRemove.map((g) => g.id);
-  await db.delete(games).where(inArray(games.id, ids));
+  await deleteGames(db, ids);
 
   console.log(`\nRemoved ${toRemove.length} games from database.`);
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

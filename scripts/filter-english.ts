@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 
 import { db } from "../src/db/client";
+import { deleteGames, readAllGames, reportManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { hasEnglishSupport, getLanguages } from "../src/services/language-lookup";
-import { eq, inArray } from "drizzle-orm";
 
 interface NonEnglishGame {
   id: number;
@@ -13,7 +13,7 @@ interface NonEnglishGame {
 }
 
 async function findNonEnglishGames(): Promise<NonEnglishGame[]> {
-  const allGames = await db.select().from(games);
+  const allGames = await readAllGames(db);
   const nonEnglish: NonEnglishGame[] = [];
 
   for (const game of allGames) {
@@ -70,7 +70,7 @@ async function main() {
     console.log(`\nRemoving ${nonEnglish.length} game(s)...`);
 
     const idsToRemove = nonEnglish.map((g) => g.id);
-    await db.delete(games).where(inArray(games.id, idsToRemove));
+    await deleteGames(db, idsToRemove);
 
     console.log("Done! Games removed.");
   } else {
@@ -78,7 +78,4 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

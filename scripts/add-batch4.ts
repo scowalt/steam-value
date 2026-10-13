@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { findGame, insertGames, readAllGames, recoverableManualError, reportManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { fetchSteamData } from "../src/scrapers/steam";
 import { getHltbById } from "../src/scrapers/hltb";
@@ -116,9 +117,7 @@ const GAMES: { steamId: number; hltbId?: number; endless?: boolean }[] = [
 ];
 
 async function addGame(steamId: number, hltbId?: number, endless = false) {
-  const existing = await db.query.games.findFirst({
-    where: eq(games.steamAppId, steamId),
-  });
+  const existing = await findGame(db, steamId);
   if (existing) {
     return { status: "exists", name: existing.name };
   }
@@ -140,7 +139,7 @@ async function addGame(steamId: number, hltbId?: number, endless = false) {
       isEndless: endless,
     });
 
-    await db.insert(games).values({
+    await insertGames(db, [{
       steamAppId: steamId,
       name: steam.name,
       steamReviewScore: steam.reviewScore,
@@ -151,7 +150,7 @@ async function addGame(steamId: number, hltbId?: number, endless = false) {
       hltbCompletionist: hltb?.completionist ?? null,
       valueScore: score,
       isEndless: endless,
-    });
+    }]);
 
     return {
       status: "added",
@@ -159,8 +158,8 @@ async function addGame(steamId: number, hltbId?: number, endless = false) {
       score: score?.toFixed(2),
       hours: hltb?.main?.toFixed(1),
     };
-  } catch (e: any) {
-    return { status: "error", error: e.message?.slice(0, 50) };
+  } catch (error) {
+    return { status: "error", error: recoverableManualError(error).message.slice(0, 50) };
   }
 }
 
@@ -170,7 +169,7 @@ async function main() {
   let added = 0, skipped = 0, errors = 0;
 
   for (let i = 0; i < GAMES.length; i++) {
-    const g = GAMES[i];
+    const g = GAMES[i]!;
     const result = await addGame(g.steamId, g.hltbId, g.endless);
 
     if (result.status === "added") {
@@ -190,8 +189,8 @@ async function main() {
   console.log(`\n${"═".repeat(50)}`);
   console.log(`Added: ${added} | Skipped: ${skipped} | Errors: ${errors}`);
 
-  const total = await db.query.games.findMany();
+  const total = await readAllGames(db);
   console.log(`Total games in database: ${total.length}`);
 }
 
-main().catch(console.error);
+main().catch(reportManualError);

@@ -351,42 +351,6 @@ export class SteamClient {
     }
   }
 
-  async getControllerSupport(appId: number): Promise<"full" | "partial" | null> {
-    const cacheKey = `controller:${appId}`;
-    const cached = this.cache.get(cacheKey) as "full" | "partial" | null | undefined;
-    if (cached !== undefined) {
-      this.stats.cacheHits++;
-      return cached;
-    }
-
-    const url = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
-
-    try {
-      const data = await this.fetchWithRetry<SteamAppDetailsResponse>(url);
-      const appData = data[appId.toString()];
-
-      if (!appData?.success || !appData.data?.categories) {
-        this.cache.set(cacheKey, null, this.config.cacheTtlMs);
-        return null;
-      }
-
-      const categories = appData.data.categories;
-      let result: "full" | "partial" | null = null;
-
-      if (categories.some((c) => c.id === 28)) {
-        result = "full";
-      } else if (categories.some((c) => c.id === 18)) {
-        result = "partial";
-      }
-
-      this.cache.set(cacheKey, result, this.config.cacheTtlMs);
-      return result;
-    } catch {
-      this.cache.set(cacheKey, null, this.config.cacheTtlMs);
-      return null;
-    }
-  }
-
   async getReleaseDate(appId: number): Promise<string | null> {
     const cacheKey = `releaseDate:${appId}`;
     const cached = this.cache.get(cacheKey) as string | null | undefined;
@@ -425,7 +389,7 @@ export class SteamClient {
     try {
       const date = new Date(dateStr);
       if (isNaN(date.getTime())) return null;
-      return date.toISOString().split("T")[0];
+      return date.toISOString().split("T")[0]!;
     } catch {
       return null;
     }

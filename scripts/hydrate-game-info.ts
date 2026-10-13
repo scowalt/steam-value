@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";
 import { eq } from "drizzle-orm";
 
 async function main() {
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   console.log(`Hydrating ${allGames.length} games...`);
 
   let earlyAccessCount = 0;
@@ -25,10 +26,7 @@ async function main() {
       isEA !== game.isEarlyAccess || controller !== game.controllerSupport;
 
     if (needsUpdate) {
-      await db
-        .update(games)
-        .set({ isEarlyAccess: isEA, controllerSupport: controller })
-        .where(eq(games.id, game.id));
+      await updateGame(db, eq(games.id, game.id), { isEarlyAccess: isEA, controllerSupport: controller });
 
       const changes = [];
       if (isEA !== game.isEarlyAccess && isEA) changes.push("EA");
@@ -55,7 +53,4 @@ async function main() {
   console.log(`  Partial Controller: ${partialControllerCount}`);
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

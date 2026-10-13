@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, recoverableManualError, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -18,7 +19,7 @@ async function fetchAppDetails(appId: number): Promise<AppDetails | null> {
   try {
     const res = await fetch(url);
     if (res.status === 429) return null;  
-    const data = await res.json();
+    const data = await res.json() as Record<string, AppDetails>;
     return data[appId.toString()] || null;
   } catch {
     return null;
@@ -26,7 +27,7 @@ async function fetchAppDetails(appId: number): Promise<AppDetails | null> {
 }
 
 async function main() {
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   console.log(`Hydrating ${allGames.length} games (fast mode)...`);
 
   let earlyAccessCount = 0;
@@ -73,10 +74,7 @@ async function main() {
 
     if (needsUpdate) {
       try {
-        await db
-          .update(games)
-          .set({ isEarlyAccess: isEA, controllerSupport: controller })
-          .where(eq(games.id, game.id));
+        await updateGame(db, eq(games.id, game.id), { isEarlyAccess: isEA, controllerSupport: controller });
 
         const changes = [];
         if (isEA !== game.isEarlyAccess && isEA) changes.push("EA");
@@ -86,8 +84,8 @@ async function main() {
         if (changes.length > 0) {
           console.log(`  ${game.name}: ${changes.join(", ")}`);
         }
-      } catch (err: any) {
-        console.error(`  Error updating ${game.name}: ${err.message}`);
+      } catch (error) {
+        console.error(`  Error updating ${game.name}: ${recoverableManualError(error).message}`);
       }
     }
 
@@ -111,7 +109,4 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

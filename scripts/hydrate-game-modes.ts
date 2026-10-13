@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";
 import { eq } from "drizzle-orm";
 
 async function main() {
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   console.log(`Hydrating game modes for ${allGames.length} games...\n`);
 
   let processed = 0;
@@ -37,9 +38,7 @@ async function main() {
       modes.isMMO !== game.isMMO;
 
     if (needsUpdate) {
-      await db
-        .update(games)
-        .set({
+      await updateGame(db, eq(games.id, game.id), {
           hasSinglePlayer: modes.hasSinglePlayer,
           hasMultiplayer: modes.hasMultiplayer,
           hasCoOp: modes.hasCoOp,
@@ -50,8 +49,7 @@ async function main() {
           hasLocalPvP: modes.hasLocalPvP,
           hasCrossplatform: modes.hasCrossplatform,
           isMMO: modes.isMMO,
-        })
-        .where(eq(games.id, game.id));
+        });
 
       updated++;
 
@@ -95,4 +93,4 @@ async function main() {
   console.log(`MMO: ${mmo}`);
 }
 
-main().catch(console.error);
+main().catch(reportManualError);

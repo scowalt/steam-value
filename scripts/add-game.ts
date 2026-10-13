@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { findGame, insertGames, reportManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { fetchSteamData, isGame } from "../src/scrapers/steam";
 import { verifyHltbMapping, verifyManualHltbId } from "../src/services/hltb-mapping";
@@ -19,9 +20,9 @@ function parseArgs() {
   let force = false;
 
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
+    const arg = args[i]!;
     if (arg === "--hltb-id" && args[i + 1]) {
-      hltbId = parseInt(args[i + 1], 10);
+      hltbId = parseInt(args[i + 1]!, 10);
       i++;
     } else if (arg === "--endless") {
       isEndless = true;
@@ -60,9 +61,7 @@ async function main() {
 
   console.log(`Fetching data for Steam App ID: ${steamAppId}...`);
 
-  const existing = await db.query.games.findFirst({
-    where: eq(games.steamAppId, steamAppId),
-  });
+  const existing = await findGame(db, steamAppId);
 
   if (existing) {
     console.log(`Game "${existing.name}" already exists (id: ${existing.id})`);
@@ -166,9 +165,7 @@ async function main() {
 
   console.log(`\nValue Score: ${valueScore?.toFixed(2) ?? "N/A"}${isEndless ? " (endless game)" : ""}`);
 
-  const result = await db
-    .insert(games)
-    .values({
+  const result = await insertGames(db, [{
       steamAppId,
       name: steamData.name,
       steamReviewScore: steamData.reviewScore,
@@ -179,8 +176,7 @@ async function main() {
       hltbCompletionist: hltbData?.completionist ?? null,
       valueScore,
       isEndless,
-    })
-    .returning();
+    }]);
 
   const inserted = result[0];
   console.log(`\nGame saved to database (id: ${inserted?.id ?? "unknown"})`);
@@ -200,7 +196,4 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

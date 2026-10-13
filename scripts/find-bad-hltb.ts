@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames } from "../src/db/manual";
 
-const all = await db.query.games.findMany();
+const all = await readAllGames(db);
 
 const suspicious = all
   .filter(g => g.hltbMain !== null && g.hltbMain < 3 && !g.isEndless)

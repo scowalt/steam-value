@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { findGame, insertGames, readAllGames, recoverableManualError, reportManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { fetchSteamData } from "../src/scrapers/steam";
 import { getHltbById } from "../src/scrapers/hltb";
@@ -120,9 +121,7 @@ const TOP_100_GAMES: { steamId: number; hltbId: number; name: string; endless?: 
 ];
 
 async function addGame(steamId: number, hltbId: number, expectedName: string, isEndless: boolean = false) {
-  const existing = await db.query.games.findFirst({
-    where: eq(games.steamAppId, steamId),
-  });
+  const existing = await findGame(db, steamId);
 
   if (existing) {
     return { status: "exists", game: existing };
@@ -146,9 +145,7 @@ async function addGame(steamId: number, hltbId: number, expectedName: string, is
       isEndless,
     });
 
-    const result = await db
-      .insert(games)
-      .values({
+    const result = await insertGames(db, [{
         steamAppId: steamId,
         name: steamData.name,
         steamReviewScore: steamData.reviewScore,
@@ -159,12 +156,11 @@ async function addGame(steamId: number, hltbId: number, expectedName: string, is
         hltbCompletionist: hltbData?.completionist ?? null,
         valueScore,
         isEndless,
-      })
-      .returning();
+      }]);
 
     return { status: "added", game: result[0], hltbData };
   } catch (error) {
-    return { status: "error", error: (error as Error).message };
+    return { status: "error", error: recoverableManualError(error).message };
   }
 }
 
@@ -201,7 +197,7 @@ async function main() {
   console.log(`  Summary: ${results.added} added, ${results.exists} existing, ${results.errors} errors`);
   console.log(`${"─".repeat(78)}\n`);
 
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   const rankedGames = allGames.filter((g) => g.valueScore !== null && !g.isEndless);
   const byValue = [...rankedGames].sort((a, b) => (b.valueScore ?? 0) - (a.valueScore ?? 0));
 
@@ -227,4 +223,4 @@ async function main() {
   console.log(`Games with value scores: ${rankedGames.length}`);
 }
 
-main().catch(console.error);
+main().catch(reportManualError);

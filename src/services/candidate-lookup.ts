@@ -27,10 +27,10 @@ const STEAMDB_PATH = new URL("../data/steamdb-raw.json", import.meta.url).pathna
 
 function parseHltbIdFromUrl(url: string): number | null {
   const queryMatch = url.match(/[?&]id=(\d+)/);
-  if (queryMatch) return parseInt(queryMatch[1]);
+  if (queryMatch) return parseInt(queryMatch[1]!);
 
   const pathMatch = url.match(/\/game\/(\d+)/);
-  if (pathMatch) return parseInt(pathMatch[1]);
+  if (pathMatch) return parseInt(pathMatch[1]!);
 
   return null;
 }
