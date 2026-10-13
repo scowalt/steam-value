@@ -1,4 +1,5 @@
 import type { Client } from "@libsql/client/web";
+import type { DbClient } from "../db/access";
 
 const SYNC_STATE_KEY = "steam_status";
 const LOCK_TTL_SECONDS = 15 * 60;
@@ -93,7 +94,7 @@ export async function ensureSyncStateTable(client: Client): Promise<void> {
   )`);
 }
 
-export async function getSyncState(client: Client): Promise<SyncState | null> {
+export async function getSyncState(client: DbClient): Promise<SyncState | null> {
   try {
     const result = await client.execute({
       sql: "SELECT * FROM sync_state WHERE key = ?",
@@ -111,7 +112,7 @@ export async function getSyncState(client: Client): Promise<SyncState | null> {
 }
 
 export async function syncSteamStatus(
-  client: Client,
+  client: DbClient,
   env: SteamStatusEnv
 ): Promise<SyncResult> {
   return runSteamStatusSync(client, async () => {
@@ -125,7 +126,7 @@ export async function syncSteamStatus(
 }
 
 export async function syncSteamStatusFromUserData(
-  client: Client,
+  client: DbClient,
   env: SteamStatusEnv,
   userData: SteamUserData
 ): Promise<SyncResult> {
@@ -136,11 +137,9 @@ export async function syncSteamStatusFromUserData(
 }
 
 async function runSteamStatusSync(
-  client: Client,
+  client: DbClient,
   loadData: () => Promise<{ userData: SteamUserData } & SteamLibrarySnapshot>
 ): Promise<SyncResult> {
-  await ensureSyncStateTable(client);
-
   const lockExpiresAt = await acquireSyncLock(client);
   if (!lockExpiresAt) {
     return {
@@ -168,7 +167,7 @@ async function runSteamStatusSync(
     const ignoredSet = new Set(Object.keys(userData.rgIgnoredApps!).map(Number));
     const wishlistSet = new Set(userData.rgWishlist!);
 
-    const updates: { sql: string; args: (number | boolean | null)[] }[] = [];
+    const updates: { sql: string; args: (number | null)[] }[] = [];
 
     for (const game of currentGames) {
       const isIgnored = ignoredSet.has(game.steamAppId);
@@ -292,7 +291,7 @@ function isSuspiciousDrop(previous: number, current: number): boolean {
   return previous >= 10 && current < Math.floor(previous * 0.2);
 }
 
-async function acquireSyncLock(client: Client): Promise<number | null> {
+async function acquireSyncLock(client: DbClient): Promise<number | null> {
   const now = unixNow();
   const lockExpiresAt = now + LOCK_TTL_SECONDS;
 
@@ -320,7 +319,7 @@ async function acquireSyncLock(client: Client): Promise<number | null> {
   return result.rowsAffected > 0 ? lockExpiresAt : null;
 }
 
-async function markSyncSuccess(client: Client, result: SyncResult, lockExpiresAt: number): Promise<void> {
+async function markSyncSuccess(client: DbClient, result: SyncResult, lockExpiresAt: number): Promise<void> {
   const now = unixNow();
 
   await client.execute({
@@ -350,7 +349,7 @@ async function markSyncSuccess(client: Client, result: SyncResult, lockExpiresAt
   });
 }
 
-async function markSyncFailure(client: Client, error: string, lockExpiresAt: number): Promise<void> {
+async function markSyncFailure(client: DbClient, error: string, lockExpiresAt: number): Promise<void> {
   const now = unixNow();
 
   await client.execute({
@@ -437,7 +436,7 @@ export function resolvePlaytimeMinutes(
   return values.length > 0 ? Math.max(...values) : null;
 }
 
-async function fetchCurrentGameStatuses(client: Client): Promise<CurrentGameStatus[]> {
+async function fetchCurrentGameStatuses(client: DbClient): Promise<CurrentGameStatus[]> {
   const result = await client.execute(`
     SELECT
       id,
@@ -460,8 +459,8 @@ async function fetchCurrentGameStatuses(client: Client): Promise<CurrentGameStat
 }
 
 async function runBatches(
-  client: Client,
-  statements: { sql: string; args: (number | boolean | null)[] }[]
+  client: DbClient,
+  statements: { sql: string; args: (number | null)[] }[]
 ): Promise<void> {
   for (let i = 0; i < statements.length; i += BATCH_SIZE) {
     await client.batch(statements.slice(i, i + BATCH_SIZE), "write");
