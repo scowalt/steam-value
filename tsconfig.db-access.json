@@ -11,6 +11,7 @@
     "src/db/drizzle.ts",
     "src/db/client.ts",
     "src/db/request.test.ts",
+    "src/db/testing.test.ts",
     "scripts/cloudflare-secrets.ts"
   ]
 }
