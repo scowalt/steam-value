@@ -34,14 +34,17 @@ export class MigrationError extends Error {
 }
 
 const metadataTable = "steam_value_migrations";
+const metadataIndex = `sqlite_autoindex_${metadataTable}_1`;
 const metadataCreateSql = `CREATE TABLE ${metadataTable} (
   id TEXT PRIMARY KEY NOT NULL, checksum TEXT NOT NULL, schema_json TEXT NOT NULL,
   applied_at INTEGER NOT NULL DEFAULT (unixepoch())
 )`;
 const schemaJsonQuery = `SELECT json_group_array(json_object('type', type, 'name', name, 'table', tbl_name, 'sql', sql)) AS schema_json
   FROM (SELECT type, name, tbl_name, sql FROM sqlite_schema
-    WHERE name <> '_cf_METADATA'
-      AND tbl_name NOT IN ('${metadataTable}', 'sqlite_sequence')
+    WHERE NOT (type = 'table' AND name = '_cf_METADATA' AND tbl_name = '_cf_METADATA')
+      AND NOT (type = 'table' AND name = 'sqlite_sequence' AND tbl_name = 'sqlite_sequence')
+      AND NOT (type = 'table' AND name = '${metadataTable}' AND tbl_name = '${metadataTable}')
+      AND NOT (type = 'index' AND name = '${metadataIndex}' AND tbl_name = '${metadataTable}' AND sql IS NULL)
     ORDER BY type, name)`;
 
 export async function applyMigrations(binding: D1Database, migrations: readonly DbMigration[]): Promise<MigrationReport> {
@@ -66,10 +69,12 @@ export async function applyMigrations(binding: D1Database, migrations: readonly 
       throw new MigrationError("SCHEMA_DRIFT", "Schema inventory is unavailable or incompatible; stop for reviewed inspection");
     }
   };
-  let metadata: { type: string; name: string; tbl_name: string; sql: string }[];
+  let metadata: { type: string; name: string; tbl_name: string; sql: string | null }[];
   try {
-    metadata = (await binding.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name IN ('_cf_METADATA','sqlite_sequence',?) ORDER BY name").bind(metadataTable).all<{ type: string; name: string; tbl_name: string; sql: string }>()).results;
-    if (metadata.some((object) => object.type !== "table" || object.tbl_name !== object.name || typeof object.sql !== "string")) throw new Error("Incompatible metadata object");
+    metadata = (await binding.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name IN ('_cf_METADATA','sqlite_sequence',?,?) ORDER BY name").bind(metadataTable, metadataIndex).all<{ type: string; name: string; tbl_name: string; sql: string | null }>()).results;
+    if (metadata.some((object) => object.name === metadataIndex
+      ? object.type !== "index" || object.tbl_name !== metadataTable || object.sql !== null
+      : object.type !== "table" || object.tbl_name !== object.name || typeof object.sql !== "string")) throw new Error("Incompatible metadata object");
   } catch {
     throw new MigrationError("SCHEMA_DRIFT", "Schema inventory is unavailable or incompatible; stop for reviewed inspection");
   }
@@ -83,7 +88,7 @@ export async function applyMigrations(binding: D1Database, migrations: readonly 
   }
   const metadataSql = metadata.find((object) => object.name === metadataTable)?.sql ?? null;
   const hasMetadata = metadataSql !== null;
-  if (hasMetadata && metadataSql !== metadataCreateSql) {
+  if (hasMetadata !== metadata.some((object) => object.name === metadataIndex) || (hasMetadata && metadataSql !== metadataCreateSql)) {
     throw new MigrationError("SCHEMA_DRIFT", "Migration metadata has an incompatible schema");
   }
   let history: { id: string; checksum: string; schema_json: string }[];

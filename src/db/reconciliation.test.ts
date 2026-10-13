@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createLocalD1, type LocalD1Owner } from "./local-d1";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
-import { createD1TransferSource, createD1TransferTarget, exportSnapshot, importSnapshot, inventorySource, prepareRollback, validateSnapshot, type FreezeRecord, type TransferTarget } from "./transfer";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createD1TransferSource, createD1TransferTarget, createProtectedImportReceiptPublisher, exportSnapshot, importSnapshot, inventorySource, prepareRollback, validateSnapshot, type FreezeRecord, type ImportReceipt, type TransferTarget } from "./transfer";
+import { chmod, link, lstat, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createD1WorkerTestHarness, type D1WorkerTestHarness } from "./testing";
 import { createHttpClient } from "./http";
@@ -398,6 +399,500 @@ test("native operator authorization refuses a reserved metadata lookalike and re
   const binding = await preparedBinding();
   await expect(binding.prepare("CREATE INDEX _cf_unreviewed ON games(name)").run()).rejects.toThrow(/not authorized/i);
   expect(await applyMigrations(binding, await loadMigrations())).toMatchObject({ applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"] });
+});
+
+test("bootstrap refuses an attached checksum-ledger trigger before append, preserving nonempty application state and immutable receipts before any dispatch", async () => {
+  const binding = await emptyBinding();
+  const migrations = await loadMigrations();
+  await applyMigrations(binding, migrations.slice(0, 1));
+  await binding.batch([
+    binding.prepare("INSERT INTO games (id,steam_app_id,name,hltb_main,value_score,is_owned,tags,created_at) VALUES (7,42,'Synthetic retained β',12.25,42.5,NULL,'[ \"β\" ]',1700000000)"),
+    binding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,43,'Deleted allocation')"), binding.prepare("DELETE FROM games WHERE id=950"),
+    binding.prepare("INSERT INTO sync_state (key,updated_at) VALUES (NULL,1700000000)"),
+    binding.prepare("INSERT INTO catalog_refresh_state (key,updated_at) VALUES ('steam_official_catalog',1700000001)"),
+    binding.prepare("INSERT INTO catalog_refresh_failures VALUES (1999,'Synthetic orphan','Synthetic retry',3,1700000002)"),
+    binding.prepare("INSERT INTO itad_game_map VALUES (1999,NULL,1700000003)"),
+    binding.prepare("INSERT INTO game_deal_cache VALUES (1999,'GB','retail',1700000004,'[]')"),
+    binding.prepare("INSERT INTO deal_refresh_state (country) VALUES ('GB')"),
+  ]);
+  const tables = ["games","sync_state","catalog_refresh_state","catalog_refresh_failures","itad_game_map","game_deal_cache","deal_refresh_state","sqlite_sequence","steam_value_migrations"];
+  const contents = async () => (await binding.batch(tables.map((table) => binding.prepare(`SELECT * FROM ${table} ORDER BY rowid`)))).map((result) => result.results);
+  const before = await contents();
+  expect(before.every((rows) => rows.length > 0)).toBe(true);
+  expect(await binding.prepare("SELECT name,hltb_main,typeof(hltb_main) AS storage,is_owned FROM games").all()).toMatchObject({ results: [{ name: "Synthetic retained β", hltb_main: 12.25, storage: "real", is_owned: null }] });
+  const schemaJson = await binding.prepare("SELECT schema_json FROM steam_value_migrations WHERE id='0001_complete_schema.sql'").first<string>("schema_json");
+  expect(await migrationChecksum(schemaJson!)).toBe("1b81a22b762050c5743fe24c78e9d7528dd966deccac96491548460430d967e5");
+  await binding.prepare("CREATE TRIGGER unreviewed_receipt_trigger AFTER INSERT ON steam_value_migrations BEGIN UPDATE games SET name='Synthetic unexpectedly changed'; END").run();
+  let dispatched = false;
+  const guarded = new Proxy(binding, { get(native, key) {
+    if (key === "batch") return (statements: Parameters<typeof binding.batch>[0]) => { dispatched = true; return native.batch(statements); };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  await expect(applyMigrations(guarded, migrations)).rejects.toMatchObject({ code: "SCHEMA_DRIFT" });
+  expect(dispatched).toBe(false);
+  expect(await contents()).toEqual(before);
+  expect((await binding.prepare("SELECT name FROM sqlite_schema WHERE name IN ('__drizzle_migrations','idx_games_status_filters','idx_games_value_score')").all()).results).toEqual([]);
+});
+
+test.each([
+  { stage: "repeat", object: "index", sql: "CREATE INDEX unreviewed_receipt_index ON steam_value_migrations(checksum)" },
+  { stage: "append", object: "index", sql: "CREATE INDEX unreviewed_receipt_index ON steam_value_migrations(checksum)" },
+  { stage: "repeat", object: "trigger", sql: "CREATE TRIGGER unreviewed_receipt_trigger AFTER INSERT ON steam_value_migrations BEGIN UPDATE games SET name='Synthetic unexpectedly changed'; END" },
+])("bootstrap refuses an attached checksum-ledger $object on $stage without writes or receipt changes", async ({ stage, sql }) => {
+  const binding = await emptyBinding();
+  const migrations = await loadMigrations();
+  await applyMigrations(binding, stage === "append" ? migrations.slice(0, 1) : migrations);
+  await binding.prepare("INSERT INTO games (id,steam_app_id,name,value_score,is_owned) VALUES (7,42,'Synthetic retained',42.5,NULL)").run();
+  const contents = async () => (await binding.batch([
+    binding.prepare("SELECT rowid,*,typeof(value_score) AS storage FROM games ORDER BY rowid"),
+    binding.prepare("SELECT * FROM sqlite_sequence ORDER BY rowid"),
+    binding.prepare("SELECT rowid,* FROM steam_value_migrations ORDER BY rowid"),
+  ])).map((result) => result.results);
+  const before = await contents();
+  await binding.prepare(sql).run();
+  let dispatched = false;
+  const guarded = new Proxy(binding, { get(native, key) {
+    if (key === "batch") return (statements: Parameters<typeof binding.batch>[0]) => { dispatched = true; return native.batch(statements); };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  await expect(applyMigrations(guarded, migrations)).rejects.toMatchObject({ code: "SCHEMA_DRIFT" });
+  expect(dispatched).toBe(false);
+  expect(await contents()).toEqual(before);
+});
+
+test("sequence-only cancellation after a native read refuses the next mutation and remains durably incomplete", async () => {
+  const sourceBinding = await preparedBinding();
+  await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "cancel-source", freezeRecord: freeze("cancel-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("cancel-before"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  let dispatched = false;
+  const monitored = new Proxy(binding, { get(native, key) {
+    if (key === "batch") return (statements: Parameters<typeof binding.batch>[0]) => { dispatched = true; return native.batch(statements); };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  const base = createD1TransferTarget(monitored, { id: "cancel-before-target", intent: "empty", freezeRecord: freeze("cancel-before-target"), receiptPath: await artifactPath("cancel-before.json"), signal: controller.signal });
+  const target: TransferTarget = { ...base, async query(sql, args) {
+    const rows = await base.query(sql, args);
+    if ((await Bun.file(base.receiptPath).json()).phase === "sequence") controller.abort();
+    return rows;
+  } };
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(controller.signal.aborted).toBe(true);
+  expect(dispatched).toBe(false);
+  expect(await Bun.file(target.receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "not-started", errorCode: "INCOMPLETE_IMPORT" });
+  expect((await inventorySource(base)).sequence).toEqual([]);
+  await expect(validateSnapshot(base, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test("cancellation after a committed sequence-only group preserves incomplete state and validates only a fresh recovery", async () => {
+  const sourceBinding = await preparedBinding();
+  await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "committed-cancel-source", freezeRecord: freeze("committed-cancel-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("committed-cancel"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  const cancelledReply = new Proxy(binding, { get(native, key) {
+    if (key === "batch") return async (statements: Parameters<typeof binding.batch>[0]) => {
+      const result = await native.batch(statements);
+      controller.abort();
+      return result;
+    };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  const target = createD1TransferTarget(cancelledReply, { id: "committed-cancel-target", intent: "empty", freezeRecord: freeze("committed-cancel-target"), receiptPath: await artifactPath("committed-cancel.json"), signal: controller.signal });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(await Bun.file(target.receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "partial-or-unknown", errorCode: "INCOMPLETE_IMPORT", confirmedRows: { games: 0, __drizzle_migrations: 0 } });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: [{ name: "games", seq: 950 }] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  const replay = createD1TransferTarget(binding, { id: "committed-cancel-target", intent: "empty", freezeRecord: freeze("committed-cancel-target"), receiptPath: await artifactPath("committed-replay.json") });
+  await expect(importSnapshot(replay, snapshot)).rejects.toMatchObject({ code: "TARGET_NOT_EMPTY" });
+  const recovery = await artifactPath("committed-recovery");
+  expect(await prepareRollback(target, snapshot, recovery)).toMatchObject({ status: "reconciliation-required", automaticReversion: false, sequenceChanged: false });
+  let restored: TransferTarget | undefined;
+  let harness: D1WorkerTestHarness;
+  harness = await createD1WorkerTestHarness({ operatorSetup: async (native) => {
+    restored = createD1TransferTarget(native, { id: "fresh-cancel-recovery", intent: "empty", freezeRecord: freeze("fresh-cancel-recovery"), receiptPath: await artifactPath("fresh-cancel.json"), verifyBehavior: async () => {
+      const response = await harness.fetch("https://d1-test.invalid/api/games");
+      expect(response.status).toBe(200);
+      const page: unknown = await response.json();
+      expect(page).toEqual([]);
+      const client = createHttpClient(harness.clientConfig);
+      expect((await client.batch([
+        "SELECT COUNT(*) AS total FROM sync_state",
+        "SELECT COUNT(*) AS total FROM catalog_refresh_state",
+        "SELECT COUNT(*) AS total FROM game_deal_cache",
+      ], "read")).map((result) => result.rows)).toEqual([[{ total: 0 }],[{ total: 0 }],[{ total: 0 }]]);
+      return { passed: ["viewer", "steam-status", "catalog-facts", "offers"] };
+    } });
+    await importSnapshot(restored, recovery);
+  } });
+  try {
+    if (!restored) throw new Error("Missing explicit recovery target");
+    expect(await validateSnapshot(restored, recovery)).toMatchObject({ status: "validated", tableCount: 8 });
+    expect((await createHttpClient(harness.clientConfig).execute("INSERT INTO games (steam_app_id,name) VALUES (43,'Synthetic fresh allocation') RETURNING id")).rows).toEqual([{ id: 951 }]);
+    expect((await inventorySource(target)).sequence).toEqual([{ name: "games", seq: 950 }]);
+  } finally { await harness.dispose(); }
+});
+
+test("empty import cancellation during final native inventory cannot publish a complete receipt", async () => {
+  const source = createD1TransferSource(await preparedBinding(), { id: "empty-cancel-source", freezeRecord: freeze("empty-cancel-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("empty-cancel"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  let dispatched = false;
+  const monitored = new Proxy(binding, { get(native, key) {
+    if (key === "batch") return (statements: Parameters<typeof binding.batch>[0]) => { dispatched = true; return native.batch(statements); };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  const base = createD1TransferTarget(monitored, { id: "empty-cancel-target", intent: "empty", freezeRecord: freeze("empty-cancel-target"), receiptPath: await artifactPath("empty-cancel.json"), signal: controller.signal });
+  const target: TransferTarget = { ...base, async query(sql, args) {
+    const rows = await base.query(sql, args);
+    if (rows.length > 0 && (await Bun.file(base.receiptPath).json()).phase === "sequence") controller.abort();
+    return rows;
+  } };
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(controller.signal.aborted).toBe(true);
+  expect(dispatched).toBe(false);
+  expect(await Bun.file(base.receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "not-started", errorCode: "INCOMPLETE_IMPORT" });
+  expect(await inventorySource(base)).toMatchObject({ tables: snapshot.manifest.tables, sequence: [] });
+  await expect(validateSnapshot(base, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test.each([false, true])("cancellation at actual complete-receipt publication retains conservative state rather than success, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "publication-source", freezeRecord: freeze("publication-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("publication"), source.freezeRecord);
+  const controller = new AbortController();
+  const receiptPath = await artifactPath("publication.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  const target = createD1TransferTarget(await preparedBinding(), { id: "publication-target", intent: "empty", freezeRecord: freeze("publication-target"), receiptPath, signal: controller.signal,
+    receiptPublisher: { async publish(receipt, create) {
+      await publisher.publish(receipt, create);
+      if (receipt.status === "imported" && receipt.phase === "complete") {
+        expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+        controller.abort();
+      }
+    } },
+  });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(controller.signal.aborted).toBe(true);
+  expect(await Bun.file(target.receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "INCOMPLETE_IMPORT" });
+  expect((await inventorySource(target)).sequence).toEqual(hasSequence ? [{ name: "games", seq: 950 }] : []);
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test.each([false, true])("import awaits durable publication acknowledgement and refuses cancellation before that acknowledgement, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "ack-source", freezeRecord: freeze("ack-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("ack"), source.freezeRecord);
+  const controller = new AbortController();
+  const receiptPath = await artifactPath("ack.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  let acknowledge!: () => void;
+  const acknowledgement = new Promise<void>((resolve) => { acknowledge = resolve; });
+  let published!: () => void;
+  const publication = new Promise<void>((resolve) => { published = resolve; });
+  const target = createD1TransferTarget(await preparedBinding(), { id: "ack-target", intent: "empty", freezeRecord: freeze("ack-target"), receiptPath, signal: controller.signal,
+    receiptPublisher: { async publish(receipt, create) {
+      await publisher.publish(receipt, create);
+      if (receipt.status === "imported" && receipt.phase === "complete") {
+        expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+        published();
+        await acknowledgement;
+      }
+    } },
+  });
+  let settled = false;
+  const operation = importSnapshot(target, snapshot);
+  void operation.then(() => { settled = true; }, () => { settled = true; published(); });
+  await publication;
+  const settledBeforeAcknowledgement = settled;
+  controller.abort();
+  acknowledge();
+  await expect(operation).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(settledBeforeAcknowledgement).toBe(false);
+  expect(controller.signal.aborted).toBe(true);
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "INCOMPLETE_IMPORT" });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test.each([false, true])("cancellation after a successful returned import is not retroactive and preserves the default protected receipt, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "late-source", freezeRecord: freeze("late-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("late"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  const target = createD1TransferTarget(binding, { id: "late-target", intent: "empty", freezeRecord: freeze("late-target"), receiptPath: await artifactPath("late.json"), signal: controller.signal });
+  const receipt = await importSnapshot(target, snapshot);
+  expect(controller.signal.aborted).toBe(false);
+  expect(receipt).toMatchObject({ targetId: "late-target", status: "imported", phase: "complete", writeOutcome: "imported" });
+  const file = await lstat(target.receiptPath);
+  expect(file.mode & 0o777).toBe(0o600);
+  expect(file.nlink).toBe(1);
+  expect((await lstat(dirname(target.receiptPath))).mode & 0o777).toBe(0o700);
+  if (process.getuid) expect(file.uid).toBe(process.getuid());
+  controller.abort();
+  expect(controller.signal.aborted).toBe(true);
+  expect(await Bun.file(target.receiptPath).json()).toEqual(receipt);
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "BEHAVIOR_REQUIRED" });
+  expect(await Bun.file(target.receiptPath).json()).toMatchObject({ status: "imported", phase: "complete", writeOutcome: "imported", validation: { status: "failed", errorCode: "BEHAVIOR_REQUIRED" } });
+  expect((await binding.prepare("INSERT INTO games (steam_app_id,name) VALUES (43,'Synthetic post-return allocation') RETURNING id").all()).results).toEqual([{ id: hasSequence ? 951 : 1 }]);
+});
+
+test.each([false, true])("a real exclusive-create publication error retains conservative failure evidence and committed native state, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "publisher-error-source", freezeRecord: freeze("publisher-error-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("publisher-error"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const receiptPath = await artifactPath("publisher-error.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  const target = createD1TransferTarget(binding, { id: "publisher-error-target", intent: "empty", freezeRecord: freeze("publisher-error-target"), receiptPath,
+    receiptPublisher: { async publish(receipt, create) {
+      await publisher.publish(receipt, create);
+      if (receipt.status === "imported" && receipt.phase === "complete") {
+        expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+        await publisher.publish(receipt, true);
+      }
+    } },
+  });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "ARTIFACT_UNSAFE", confirmedRows: { games: 0, __drizzle_migrations: 0 } });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  if (hasSequence) {
+    const replay = createD1TransferTarget(binding, { id: target.id, intent: "empty", freezeRecord: target.freezeRecord, receiptPath: await artifactPath("publisher-error-replay.json") });
+    await expect(importSnapshot(replay, snapshot)).rejects.toMatchObject({ code: "TARGET_NOT_EMPTY" });
+  }
+  expect(await prepareRollback(target, snapshot, await artifactPath("publisher-error-recovery"))).toMatchObject({ status: "reconciliation-required", automaticReversion: false, sequenceChanged: false });
+});
+
+test.each([false, true])("acknowledging a stale real receipt cannot complete import or bypass public receipt identity, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "stale-publisher-source", freezeRecord: freeze("stale-publisher-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("stale-publisher"), source.freezeRecord);
+  const receiptPath = await artifactPath("stale-publisher.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  let previous: ImportReceipt | undefined;
+  const target = createD1TransferTarget(await preparedBinding(), { id: "stale-publisher-target", intent: "empty", freezeRecord: freeze("stale-publisher-target"), receiptPath,
+    receiptPublisher: { async publish(receipt, create) {
+      if (receipt.status === "imported" && receipt.phase === "complete" && previous) {
+        await publisher.publish(previous, false);
+      } else {
+        await publisher.publish(receipt, create);
+        previous = receipt;
+      }
+    } },
+  });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ targetId: "stale-publisher-target", snapshotId: snapshot.manifest.snapshotId, status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "ARTIFACT_INVALID" });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test("an injected real publisher cannot replace an existing target receipt or bypass exclusive creation", async () => {
+  const binding = await preparedBinding();
+  const source = createD1TransferSource(binding, { id: "existing-publisher-source", freezeRecord: freeze("existing-publisher-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("existing-publisher"), source.freezeRecord);
+  const receiptPath = await artifactPath("existing-publisher.json");
+  const target = createD1TransferTarget(binding, { id: "existing-publisher-target", intent: "empty", freezeRecord: freeze("existing-publisher-target"), receiptPath });
+  const receipt = await importSnapshot(target, snapshot);
+  const otherPath = await artifactPath("existing-other.json");
+  const selected = createD1TransferTarget(binding, { id: target.id, intent: "empty", freezeRecord: target.freezeRecord, receiptPath,
+    receiptPublisher: createProtectedImportReceiptPublisher(otherPath),
+  });
+  await expect(importSnapshot(selected, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+  expect(await Bun.file(otherPath).exists()).toBe(false);
+  expect((await inventorySource(selected)).tables).toEqual(snapshot.manifest.tables);
+});
+
+test.each(["file-mode", "symlink", "hardlink", "git-directory"])("the default protected publisher and validator refuse an unsafe public receipt without replacing it, fault=%s", async (fault) => {
+  const binding = await preparedBinding();
+  const source = createD1TransferSource(binding, { id: "unsafe-publisher-source", freezeRecord: freeze("unsafe-publisher-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("unsafe-publisher"), source.freezeRecord);
+  const receiptPath = await artifactPath("unsafe-publisher.json");
+  const target = createD1TransferTarget(binding, { id: "unsafe-publisher-target", intent: "empty", freezeRecord: freeze("unsafe-publisher-target"), receiptPath });
+  const receipt = await importSnapshot(target, snapshot);
+  const before = await Bun.file(receiptPath).text();
+  const preserved = join(dirname(receiptPath), "preserved.json");
+  const git = join(dirname(receiptPath), ".git");
+  if (fault === "file-mode") await chmod(receiptPath, 0o644);
+  else if (fault === "symlink") { await rename(receiptPath, preserved); await symlink(preserved, receiptPath); }
+  else if (fault === "hardlink") await link(receiptPath, preserved);
+  else await mkdir(git, { mode: 0o700 });
+  try {
+    await expect(target.receiptPublisher.publish(receipt, false)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+    expect(await Bun.file(receiptPath).text()).toBe(before);
+    await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+    expect((await inventorySource(target)).tables).toEqual(snapshot.manifest.tables);
+  } finally {
+    if (fault === "file-mode") await chmod(receiptPath, 0o600);
+    else if (fault === "symlink") { await rm(receiptPath); await rename(preserved, receiptPath); }
+    else if (fault === "hardlink") await rm(preserved);
+    else await rm(git, { recursive: true });
+  }
+});
+
+test("a real publisher bound to another path cannot acknowledge the target receipt or authorize mutation", async () => {
+  const sourceBinding = await preparedBinding();
+  await sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (17,42,'Synthetic protected publisher')").run();
+  const source = createD1TransferSource(sourceBinding, { id: "publisher-path-source", freezeRecord: freeze("publisher-path-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("publisher-path"), source.freezeRecord);
+  const receiptPath = await artifactPath("publisher-path.json");
+  const otherPath = await artifactPath("other-publisher-path.json");
+  const target = createD1TransferTarget(await preparedBinding(), { id: "publisher-path-target", intent: "empty", freezeRecord: freeze("publisher-path-target"), receiptPath,
+    receiptPublisher: createProtectedImportReceiptPublisher(otherPath),
+  });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  expect((await inventorySource(target)).tables.every((table) => table.rowCount === 0)).toBe(true);
+  expect(await Bun.file(receiptPath).exists()).toBe(false);
+  expect(await Bun.file(otherPath).json()).toMatchObject({ targetId: "publisher-path-target", status: "incomplete", phase: "preflight", writeOutcome: "not-started" });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+});
+
+test("sequence-only cancellation during final native inventory preserves an acknowledged sequence without completing", async () => {
+  const sourceBinding = await preparedBinding();
+  await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "final-cancel-source", freezeRecord: freeze("final-cancel-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("final-cancel"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  let committed = false;
+  const monitored = new Proxy(binding, { get(native, key) {
+    if (key === "batch") return async (statements: Parameters<typeof binding.batch>[0]) => { const result = await native.batch(statements); committed = true; return result; };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  const base = createD1TransferTarget(monitored, { id: "final-cancel-target", intent: "empty", freezeRecord: freeze("final-cancel-target"), receiptPath: await artifactPath("final-cancel.json"), signal: controller.signal });
+  const target: TransferTarget = { ...base, async query(sql, args) {
+    const rows = await base.query(sql, args);
+    if (committed) controller.abort();
+    return rows;
+  } };
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(controller.signal.aborted).toBe(true);
+  expect(await Bun.file(base.receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "partial-or-unknown", errorCode: "INCOMPLETE_IMPORT" });
+  expect(await inventorySource(base)).toMatchObject({ tables: snapshot.manifest.tables, sequence: [{ name: "games", seq: 950 }] });
+  await expect(validateSnapshot(base, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test("row-group cancellation after native preparation must stop before mutation even after durable progress fencing", async () => {
+  const sourceBinding = await preparedBinding();
+  await sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (17,42,'Synthetic retained')").run();
+  const source = createD1TransferSource(sourceBinding, { id: "row-cancel-source", freezeRecord: freeze("row-cancel-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("row-cancel"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  const receiptPath = await artifactPath("row-cancel.json");
+  let dispatched = false;
+  const monitored = new Proxy(binding, { get(native, key) {
+    if (key === "prepare") return (sql: string) => {
+      const statement = native.prepare(sql);
+      if (JSON.parse(readFileSync(receiptPath, "utf8")).phase === "rows") controller.abort();
+      return statement;
+    };
+    if (key === "batch") return (statements: Parameters<typeof binding.batch>[0]) => { dispatched = true; return native.batch(statements); };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  const target = createD1TransferTarget(monitored, { id: "row-cancel-target", intent: "empty", freezeRecord: freeze("row-cancel-target"), receiptPath, signal: controller.signal });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(dispatched).toBe(false);
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "partial-or-unknown", errorCode: "INCOMPLETE_IMPORT", confirmedRows: { games: 0 } });
+  expect((await inventorySource(target)).tables.every((table) => table.rowCount === 0)).toBe(true);
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test("sequence cancellation during actual preparation stops dispatch after durable unknown-outcome fencing", async () => {
+  const sourceBinding = await preparedBinding();
+  await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "prepare-cancel-source", freezeRecord: freeze("prepare-cancel-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("prepare-cancel"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  const receiptPath = await artifactPath("prepare-cancel.json");
+  let dispatched = false;
+  const monitored = new Proxy(binding, { get(native, key) {
+    if (key === "prepare") return (sql: string) => {
+      const statement = native.prepare(sql);
+      const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
+      if (receipt.phase === "sequence" && receipt.writeOutcome === "partial-or-unknown") controller.abort();
+      return statement;
+    };
+    if (key === "batch") return (statements: Parameters<typeof binding.batch>[0]) => { dispatched = true; return native.batch(statements); };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  const target = createD1TransferTarget(monitored, { id: "prepare-cancel-target", intent: "empty", freezeRecord: freeze("prepare-cancel-target"), receiptPath, signal: controller.signal });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(dispatched).toBe(false);
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "partial-or-unknown", errorCode: "INCOMPLETE_IMPORT" });
+  expect((await inventorySource(target)).sequence).toEqual([]);
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test("sequence-phase cancellation retains confirmed nonempty legacy rows and every committed typed cell", async () => {
+  const source = await populatedLegacy();
+  const snapshot = await exportSnapshot(source, await artifactPath("nonempty-cancel"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  const receiptPath = await artifactPath("nonempty-cancel.json");
+  const cancelledReply = new Proxy(binding, { get(native, key) {
+    if (key === "batch") return async (statements: Parameters<typeof binding.batch>[0]) => {
+      const result = await native.batch(statements);
+      if ((await Bun.file(receiptPath).json()).phase === "sequence") controller.abort();
+      return result;
+    };
+    const value = Reflect.get(native, key, native);
+    return typeof value === "function" ? value.bind(native) : value;
+  } });
+  const target = createD1TransferTarget(cancelledReply, { id: "nonempty-cancel-target", intent: "empty", freezeRecord: freeze("nonempty-cancel-target"), receiptPath, signal: controller.signal });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "partial-or-unknown", errorCode: "INCOMPLETE_IMPORT", confirmedRows: { __drizzle_migrations: 3, games: 2, sync_state: 3 } });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: [{ name: "games", seq: 950 }] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
 });
 
 test("bounded native restore preserves mixed storage at full-game and SERIAL-ledger parameter boundaries with row-accurate progress", async () => {

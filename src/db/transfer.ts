@@ -506,15 +506,18 @@ export interface TransferTarget extends TransferSource {
   readonly binding: D1Database;
   readonly intent: "empty" | "staging";
   readonly receiptPath: string;
+  readonly receiptPublisher: ImportReceiptPublisher;
   readonly signal?: AbortSignal;
   readonly verifyBehavior?: () => Promise<{ passed: string[] }>;
 }
 
 export function createD1TransferTarget(binding: D1Database, options: SourceOptions & {
   intent: TransferTarget["intent"]; receiptPath: string; signal?: AbortSignal; scope?: TransferSource["scope"];
-  verifyBehavior?: TransferTarget["verifyBehavior"];
+  verifyBehavior?: TransferTarget["verifyBehavior"]; receiptPublisher?: ImportReceiptPublisher;
 }): TransferTarget {
-  return { ...options, ...createD1TransferSource(binding, options), binding };
+  return { ...options, ...createD1TransferSource(binding, options), binding,
+    receiptPublisher: options.receiptPublisher ?? createProtectedImportReceiptPublisher(options.receiptPath),
+  };
 }
 
 export interface ImportReceipt {
@@ -529,6 +532,14 @@ export interface ImportReceipt {
   writeOutcome: "not-started" | "partial-or-unknown" | "imported";
   errorCode?: string;
   validation?: { status: "incomplete" | "failed" | "passed"; errorCode?: string; behaviorChecks?: string[] };
+}
+
+export interface ImportReceiptPublisher {
+  publish(receipt: ImportReceipt, create: boolean): Promise<void>;
+}
+
+export function createProtectedImportReceiptPublisher(receiptPath: string): ImportReceiptPublisher {
+  return { publish: (receipt, create) => writeJson(receiptPath, receipt, create) };
 }
 
 async function openSnapshot(input: Snapshot | string): Promise<Snapshot> {
@@ -620,8 +631,14 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     version: 1, kind: "import", targetId: target.id, snapshotId: null, manifestDigest: null,
     status: "incomplete", phase: "preflight", confirmedRows: {}, writeOutcome: "not-started",
   };
-  await writeJson(target.receiptPath, receipt, true);
-  const save = () => writeJson(target.receiptPath, receipt);
+  const publish = async (value: ImportReceipt, create = false) => {
+    const expected = JSON.stringify(value);
+    if (create && await lstat(target.receiptPath).catch(() => undefined)) throw new TransferError("ARTIFACT_UNSAFE");
+    await target.receiptPublisher.publish(value, create);
+    if (JSON.stringify(await readJson(target.receiptPath)) !== expected) throw new TransferError("ARTIFACT_INVALID");
+  };
+  await publish(receipt, true);
+  const save = () => publish(receipt);
   try {
     if (!["empty", "staging"].includes(target.intent)) throw new TransferError("TARGET_NOT_EMPTY");
     const snapshot = await verifyArtifact(input);
@@ -630,10 +647,11 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     const before = await inventorySource(target);
     if (before.sourceMigrationHistory === null || before.schemaCompatibility.profile !== "prepared-d1-v2") throw new TransferError("SCHEMA_DRIFT");
     if (before.tables.some((table) => table.rowCount !== 0) || before.sequence.length) throw new TransferError("TARGET_NOT_EMPTY");
+    const tables = (await reviewedSchema()).schema.tables;
+    receipt.confirmedRows = Object.fromEntries(tables.map((table) => [table.name, 0]));
     await save();
-    for (const table of (await reviewedSchema()).schema.tables) {
+    for (const table of tables) {
       receipt.phase = "rows";
-      receipt.confirmedRows[table.name] = 0;
       type ImportStatement = { sql: string; args: DbValue[]; rows: number };
       let batch: ImportStatement[] = [];
       let pending: ImportStatement | undefined;
@@ -645,10 +663,14 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
         if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
         receipt.writeOutcome = "partial-or-unknown";
         await save();
-        await target.binding.batch(batch.map((statement) => target.binding.prepare(statement.sql).bind(...statement.args)));
+        const statements = batch.map((statement) => target.binding.prepare(statement.sql).bind(...statement.args));
+        if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
+        await target.binding.batch(statements);
         receipt.confirmedRows[table.name]! += batch.reduce((count, statement) => count + statement.rows, 0);
+        if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
         batch = []; bytes = 0;
         await save();
+        if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
       };
       const enqueue = async () => {
         if (!pending) return;
@@ -675,20 +697,27 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     receipt.phase = "sequence";
     await save();
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     const sequence = snapshot.manifest.sequence[0];
     const generated = await readSequence(target);
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     if (sequence) {
       receipt.writeOutcome = "partial-or-unknown";
       await save();
-      await target.binding.batch([generated.length
+      const statements = [generated.length
         ? target.binding.prepare("UPDATE sqlite_sequence SET seq = CAST(? AS INTEGER) WHERE name = 'games'").bind(sequence.seq)
-        : target.binding.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('games', CAST(? AS INTEGER))").bind(sequence.seq)]);
+        : target.binding.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('games', CAST(? AS INTEGER))").bind(sequence.seq)];
+      if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
+      await target.binding.batch(statements);
+      if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     } else if (generated.length) throw new TransferError("ARTIFACT_INVALID");
     const imported = await inventorySource(target);
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     if (!same(imported.tables, snapshot.manifest.tables) || !same(imported.sequence, snapshot.manifest.sequence)) throw new TransferError("CONTENT_MISMATCH");
-    receipt.status = "imported"; receipt.phase = "complete"; receipt.writeOutcome = "imported";
-    await save();
-    return receipt;
+    const complete: ImportReceipt = { ...receipt, status: "imported", phase: "complete", writeOutcome: "imported" };
+    await publish(complete);
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
+    return complete;
   } catch (error) {
     receipt.status = "incomplete"; receipt.phase = "failed";
     receipt.errorCode = error instanceof TransferError ? error.code : "TRANSFER_FAILED";
