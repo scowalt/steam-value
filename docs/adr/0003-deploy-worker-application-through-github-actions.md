@@ -1,6 +1,6 @@
 # Deploy the Worker application through gated GitHub Actions
 
-Status: accepted
+Status: accepted for gated application deployment and infrastructure ownership; database/credential details superseded by [ADR 0004](./0004-move-database-to-cloudflare-d1.md). Production database cutover remains pending.
 
 Steam Value's GitHub Actions workflows own deployment of the `steam-value` Worker script and static assets. The unprivileged CI workflow runs pull-request and push code without production credentials. A separate `workflow_run` workflow, whose definition GitHub loads from the default branch, receives production credentials only after successful CI on `main`; it downloads that CI run's `dist` artifact and rejects a commit that is no longer current `main`. The production environment supplies a Cloudflare account ID and a token with **Editor access scoped to the existing `steam-value` Worker**; it needs no DNS, Access, R2, Turso, or Worker-creation permission.
 

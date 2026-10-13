@@ -1,6 +1,6 @@
 # Host the web surface on Cloudflare while keeping Turso
 
-Status: superseded in part for Steam Status scheduling by [ADR 0002](./0002-run-steam-status-from-persistent-steel-browser.md) and for application deployment ownership by [ADR 0003](./0003-deploy-worker-application-through-github-actions.md).
+Status: superseded in part for Steam Status scheduling by [ADR 0002](./0002-run-steam-status-from-persistent-steel-browser.md), for application deployment ownership by [ADR 0003](./0003-deploy-worker-application-through-github-actions.md), and for the database provider and external database access by [ADR 0004](./0004-move-database-to-cloudflare-d1.md). ADR 0004 is an accepted migration design; production cutover remains pending.
 
 Steam Value will move its always-on web surface to a Cloudflare Worker with Static Assets protected by Cloudflare Access, while continuing to use Turso as the database. Cloudflare will run the viewer/API plus a daily Steam Status refresh; Catalog Facts enrichment remains an occasional external job and HowLongToBeat enrichment remains manual, because long-running batch work and Playwright/login flows do not fit free Cloudflare Workers cleanly.
 
