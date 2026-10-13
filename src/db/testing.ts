@@ -32,6 +32,7 @@ export async function createD1TestHarness(workerFetch: WorkerFetch) {
 
 export interface D1WorkerTestOptions {
   bootstrap?: boolean;
+  operatorSetup?: (binding: D1Database) => Promise<void>;
 }
 
 let workerBundle: Promise<string> | undefined;
@@ -55,6 +56,7 @@ export async function createD1WorkerTestHarness(options: D1WorkerTestOptions = {
     if (options.bootstrap !== false) {
       await applyMigrations(await runtime.getD1Database("DB"), await loadMigrations());
     }
+    if (options.operatorSetup) await options.operatorSetup(await runtime.getD1Database("DB"));
     return createHarness(runtime, token, async (request) => {
       const redirect = request.redirect;
       if (redirect !== "error" && redirect !== "manual" && redirect !== "follow") throw new Error("Unsupported fixture request redirect mode");

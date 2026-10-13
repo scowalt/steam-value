@@ -16,6 +16,7 @@
     "secrets:dev": "bun scripts/cloudflare-secrets.ts dev-vars",
     "secrets:sync": "bun scripts/cloudflare-secrets.ts sync",
     "db:migrate:local": "bun scripts/db-migrate.ts --local",
+    "db:transfer": "bun --no-env-file scripts/db-transfer.ts",
     "db:generate": "doppler run --project steam-value --config dev -- bunx drizzle-kit generate",
     "db:push": "doppler run --project steam-value --config dev -- bunx drizzle-kit push",
     "db:studio": "doppler run --project steam-value --config dev -- bunx drizzle-kit studio",
