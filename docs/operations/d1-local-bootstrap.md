@@ -50,24 +50,30 @@ Receipts store ID, SQL checksum, application schema JSON and second-based applic
 
 The checked-in bootstrap uses simple SQLite statements. Quoted semicolons and escaped quote delimiters are supported; compound trigger bodies are not a promised parser surface. Any live triggers require explicit inventory and reviewed migration/parser support, never silent omission.
 
-## Reusable supplied-Worker fixture
+## Reusable Worker/D1 fixtures
 
-`src/db/testing.ts` exports `createD1TestHarness(workerFetch)`, `WorkerFetch`, `D1TestEnv`, and `D1TestHarness`. Supply the **actual existing Worker request handler**, not a duplicate SQL endpoint. The harness bootstraps the same immutable history, gives that handler the real `DB` binding and a per-instance synthetic `STEAM_VALUE_DB_TOKEN`, and returns:
+`src/db/testing.ts` exposes two fixtures with the same `fetch`/`clientConfig`/`dispose` shape:
 
-- `fetch(request)` (also accepts URL/init): in-process dispatch to the supplied handler, no provider/credential lookup or network HTTP transport.
-- `clientConfig`: synthetic HTTPS endpoint, bearer and Access credentials plus injected `fetch`, ready for #20's `createHttpClient`.
+- **`createD1WorkerTestHarness(options?)` / `D1WorkerTestHarness`: use this for ordinary request, external-client and downstream #21–#24/#26 business tests.** It bundles the actual `src/worker/index.ts` using the production browser-target/minified build options and dispatches requests inside workerd, where `DB` is native. Default setup explicitly applies the complete immutable migration history. `D1WorkerTestOptions` allows `{ bootstrap: false }` only for intentional missing-schema/no-implicit-DDL probes. Only the bundle is cached per test process; every fixture gets a new runtime, storage and synthetic bearer token.
+- **`createD1TestHarness(workerFetch)` / `D1TestHarness`: retain this for explicit supplied-handler/bootstrap, operator and handler-level edge probes.** Supply the actual existing handler, not a duplicate SQL endpoint. It bootstraps the same history and passes a real host-proxied `DB` plus synthetic `STEAM_VALUE_DB_TOKEN` in `D1TestEnv` to the supplied `WorkerFetch`. It runs the handler in Bun, not inside workerd. It is therefore not the ordinary business/request fixture: [integrated testing](d1-access-test-repair.md) found host-proxy bulk/result/lifecycle overhead at that seam.
+
+Both return:
+
+- `fetch(request)` (also accepts URL/init): the fixture's injected request transport. Native dispatch preserves method, headers, body bytes, abort signal and redirect mode, and streams the native response into the local Web Response without SDK casts. Supplied-handler dispatch preserves an existing Request when no init override is supplied, avoiding an unnecessary body clone/tee that can strand cancellation of oversized streams.
+- `clientConfig`: synthetic HTTPS endpoint, bearer and Access credentials plus injected `fetch`, ready for `createHttpClient` and `createDrizzleDb`.
 - `dispose()`: idempotent cleanup of the isolated Miniflare runtime; no production persistence. Always await it in `finally`/test cleanup.
 
-After #20 is integrated:
+Ordinary request/business setup:
 
 ```ts
-import worker from "../../src/worker/index";
-import { createD1TestHarness } from "../../src/db/testing";
+import { createD1WorkerTestHarness } from "../../src/db/testing";
 import { createHttpClient } from "../../src/db/http";
+import { createDrizzleDb } from "../../src/db/drizzle";
 
-const harness = await createD1TestHarness(worker.fetch);
+const harness = await createD1WorkerTestHarness();
 try {
   const client = createHttpClient(harness.clientConfig);
+  const db = createDrizzleDb(client);
   const result = await client.execute("SELECT COUNT(*) AS count FROM games");
   console.log(result.rows);
 } finally {
@@ -75,7 +81,7 @@ try {
 }
 ```
 
-Fixtures are independent even when created concurrently; native storage is ephemeral. Requests to another origin or after disposal are rejected. The URL is `https://d1-test.invalid/api/internal/db`; it is synthetic and is never contacted publicly. Miniflare uses disposable loopback sockets on ephemeral ports and disables CF metadata fetching. This is not a browser/development server. Local fixtures cannot verify Cloudflare edge Service Auth, deployment credentials, production subscription/capacity or live data drift.
+Own a fresh fixture per scenario and query/seed business state through the Worker/client interface, not raw binding backdoors. Fixtures are independent; native storage is ephemeral. Requests to another origin or after disposal are rejected. The URL is `https://d1-test.invalid/api/internal/db`; it is synthetic and is never contacted publicly. Miniflare uses disposable loopback sockets on ephemeral ports and disables CF metadata fetching. This is not a browser/development server. Local fixtures cannot verify Cloudflare edge Service Auth, deployment credentials, production subscription/capacity or live data drift.
 
 ## Verification
 
@@ -86,6 +92,6 @@ bun test
 bun run build
 ```
 
-The bootstrap tests exercise real isolated D1 at the explicit native seam: defaults, all-table records, nullable/required keys, JSON/kind constraints, partial/index definitions, sequence preservation, repeatability, changed-applied checksums, incompatible/untracked schema, transactional failure and ordered subsequent migrations. They do not backdoor-query business behavior; consumer tests use the supplied Worker request interface.
+The bootstrap tests exercise real isolated D1 at the explicit native seam: defaults, all-table records, nullable/required keys, JSON/kind constraints, partial/index definitions, sequence preservation, repeatability, changed-applied checksums, incompatible/untracked schema, transactional failure and ordered subsequent migrations. They do not backdoor-query business behavior; consumer tests use the native bundled-Worker request interface. Normal build/typecheck covers both database tools and database access alongside Worker, web and browser sync.
 
-#19's preparation evidence is at `/tmp/steam-value-d1-19-evidence/`: individually captured red→green slices, credential-free Wrangler-local inspection, and actual #20 Worker/external-client smoke tests through this harness. Final local verification passed 64 Bun tests (192 passes with three repetitions), all four typecheck projects, production build, and 13 comment-policy regression tests. Earlier combined-suite runs exposed Bun/workerd startup `EBADF` before SQL execution during repeated process lifecycles. Schema tests now use a different ephemeral D1 binding for each test inside one disposable workerd process, preserving isolation while reducing lifecycle churn; the three-repeat full-suite check passes. No SQL/startup retries or runtime workaround were added. Keep the original diagnostic for #27 if it recurs in other fixtures; the vendor-level cause is not certified. The smoke tests used #20's concurrent working-tree implementation read-only because it was not yet in the integration tip; rerun against the integrated implementation after its merge. #20/#21–#24/#26/#27 own the remaining request/client/business/transfer assurance. No live schema/data access, deploy, provisioning, job or arcane operation is part of this verification.
+#19's preparation evidence is at `/tmp/steam-value-d1-19-evidence/`: individually captured red→green slices, credential-free Wrangler-local inspection, and actual #20 Worker/external-client smoke tests through this harness. Final local verification passed 64 Bun tests (192 passes with three repetitions), all four typecheck projects, production build, and 13 comment-policy regression tests. Earlier combined-suite runs exposed Bun/workerd startup `EBADF` before SQL execution during repeated process lifecycles. Schema tests now use a different ephemeral D1 binding for each test inside one disposable workerd process, preserving isolation while reducing lifecycle churn; the three-repeat full-suite check passes. No SQL/startup retries or runtime workaround were added. Keep the original diagnostic for #27 if it recurs in other fixtures; the vendor-level cause is not certified. The smoke tests used #20's concurrent working-tree implementation read-only because it was not yet in the integration tip; rerun against the integrated implementation after its merge. #20's integrated repair extends this shared module with `createD1WorkerTestHarness`; its existing 83-test suite exercises that native fixture, including the retained supplied-handler edge probes. See the [repair record](d1-access-test-repair.md) for repeated unfiltered checks and the measured request-seam distinction. #21–#24/#26/#27 own the remaining business/transfer assurance. No live schema/data access, deploy, provisioning, job or arcane operation is part of this verification.

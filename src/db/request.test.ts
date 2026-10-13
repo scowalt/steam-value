@@ -1,35 +1,23 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import { Miniflare } from "miniflare";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import worker from "../worker/index";
 import { createHttpClient } from "./http";
 import { eq, sql } from "drizzle-orm";
-import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { games } from "./schema";
 import { isRecord, toDbError } from "./access";
+import { createD1TestHarness, createD1WorkerTestHarness, type D1WorkerTestHarness } from "./testing";
 
 function external(fetch = dispatch) {
   return createHttpClient({ url: endpoint, token, accessClientId: "synthetic-client-id", accessClientSecret: "synthetic-client-secret", fetch });
 }
 
-const token = "synthetic-d1-contract-token";
-const endpoint = "https://steam-value.test/api/internal/db";
-const mf = new Miniflare({
-  modules: true,
-  script: "export default { fetch() { return new Response(null); } }",
-  compatibilityDate: "2026-05-22",
-  d1Databases: { DB: crypto.randomUUID() },
-  d1Persist: false,
+let token: string;
+const endpoint = "https://d1-test.invalid/api/internal/db";
+let harness: D1WorkerTestHarness;
+beforeEach(async () => {
+  harness = await createD1WorkerTestHarness();
+  token = harness.clientConfig.token;
 });
-let binding: Awaited<ReturnType<typeof mf.getD1Database>>;
-beforeAll(async () => {
-  binding = await mf.getD1Database("DB");
-  const columns = getTableConfig(games).columns.map((column) => {
-    const fallback = typeof column.default === "boolean" ? Number(column.default) : typeof column.default === "number" ? column.default : null;
-    return `"${column.name}" ${column.getSQLType()}${column.primary ? " PRIMARY KEY AUTOINCREMENT" : ""}${column.notNull ? " NOT NULL" : ""}${column.isUnique ? " UNIQUE" : ""}${fallback !== null ? ` DEFAULT ${fallback}` : ""}`;
-  });
-  await binding.exec(`CREATE TABLE games (${columns.join(",")})`);
-});
-afterAll(async () => { await mf.dispose(); });
+afterEach(async () => { await harness?.dispose(); });
 
 function request(body: unknown, authorization?: string) {
   const headers = new Headers({ "Content-Type": "application/json" });
@@ -38,7 +26,7 @@ function request(body: unknown, authorization?: string) {
 }
 
 function dispatch(req: Request) {
-  return worker.fetch(req, { TURSO_DATABASE_URL: "", DB: binding, STEAM_VALUE_DB_TOKEN: token });
+  return harness.fetch(req);
 }
 
 const select = { version: 1, op: "execute", statement: { sql: "SELECT 42 AS answer", args: [] } };
@@ -59,6 +47,12 @@ test("machine requests preserve projection order and numeric, null and JSON text
       rowsAffected: 0,
     },
   });
+});
+
+test.each(["First isolated catalog", "Second isolated catalog"])("machine request scenarios have independent Game Catalogs: %s", async (name) => {
+  const client = external();
+  expect(await client.execute("SELECT COUNT(*) AS total FROM games")).toMatchObject({ rows: [{ total: 0 }] });
+  expect(await client.execute({ sql: "INSERT INTO games (steam_app_id, name) VALUES (?, ?) RETURNING steam_app_id, name", args: [60, name] })).toMatchObject({ rows: [{ steam_app_id: 60, name }], rowsAffected: 1 });
 });
 
 test("external raw clients send both Access headers and preserve affected rows and RETURNING", async () => {
@@ -253,13 +247,9 @@ test("lost or untrustworthy replies expose unknown writes without replay or unsa
 });
 
 test("schema errors stay recognizable and Drizzle-wrapped unknown outcomes keep only safe diagnostics", async () => {
-  const empty = new Miniflare({
-    modules: true, script: "export default { fetch() { return new Response(null); } }",
-    compatibilityDate: "2026-05-22", d1Databases: { DB: crypto.randomUUID() }, d1Persist: false,
-  });
+  const empty = await createD1WorkerTestHarness({ bootstrap: false });
   try {
-    const db = await empty.getD1Database("DB");
-    const unbootstrapped = external((req) => worker.fetch(req, { DB: db, STEAM_VALUE_DB_TOKEN: token }));
+    const unbootstrapped = createHttpClient(empty.clientConfig);
     await expect(unbootstrapped.execute("SELECT last_error FROM sync_state")).rejects.toMatchObject({ code: "SQL_ERROR", outcome: "not-applied", message: "no such table: sync_state" });
     await expect(unbootstrapped.execute("SELECT name FROM games")).rejects.toMatchObject({ code: "SQL_ERROR", outcome: "not-applied", message: "no such table: games" });
   } finally { await empty.dispose(); }
@@ -385,12 +375,16 @@ test("request bounds include every bind and actual UTF-8 bytes without splitting
     ...Array.from({ length: 5 }, () => ({ sql: "SELECT ? AS payload", args: ["x".repeat(900000)] })),
   ] });
   const bytes = new TextEncoder().encode(body);
-  const streamed = new Request(endpoint, {
-    method: "POST", headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "Content-Length": "1" },
-    body: new ReadableStream({ start(controller) { for (let i = 0; i < bytes.length; i += 32768) controller.enqueue(bytes.slice(i, i + 32768)); controller.close(); } }),
-  });
-  const response = await dispatch(streamed);
-  expect(response.status).toBe(413);
+  const streamedProbe = await createD1TestHarness(worker.fetch);
+  try {
+    const streamed = new Request(endpoint, {
+      method: "POST", headers: { "Authorization": `Bearer ${streamedProbe.clientConfig.token}`, "Content-Type": "application/json", "Content-Length": "1" },
+      body: new ReadableStream({ start(controller) { for (let i = 0; i < bytes.length; i += 32768) controller.enqueue(bytes.slice(i, i + 32768)); controller.close(); } }),
+    });
+    const response = await streamedProbe.fetch(streamed);
+    expect(response.status).toBe(413);
+    expect(await createHttpClient(streamedProbe.clientConfig).execute("SELECT name FROM games WHERE steam_app_id = 29")).toMatchObject({ rows: [] });
+  } finally { await streamedProbe.dispose(); }
   expect(await client.execute("SELECT name FROM games WHERE steam_app_id = 29")).toMatchObject({ rows: [] });
 });
 
@@ -429,7 +423,10 @@ test("machine authorization precedes parsing and binding checks; methods, paths 
   const configuredAuth = malformed();
   configuredAuth.headers.set("Authorization", `Bearer ${token}`);
   expect((await worker.fetch(configuredAuth, env)).status).toBe(503);
-  expect((await worker.fetch(request(select, `Bearer ${token}`), { DB: binding })).status).toBe(503);
+  const missingToken = await createD1TestHarness((req, env) => worker.fetch(req, { DB: env.DB }));
+  try {
+    expect((await missingToken.fetch(request(select, `Bearer ${missingToken.clientConfig.token}`))).status).toBe(503);
+  } finally { await missingToken.dispose(); }
   const invalid = [
     new Request(endpoint, { method: "GET", headers: { "Authorization": `Bearer ${token}` } }),
     new Request(endpoint, { method: "POST", headers: { "Authorization": `Bearer ${token}`, "Content-Type": "text/plain" }, body: JSON.stringify(select) }),
@@ -442,7 +439,7 @@ test("machine authorization precedes parsing and binding checks; methods, paths 
     expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST", outcome: "not-applied" } });
   }
   for (const path of ["/api/internal/db/", "/api/internal/%64b", "/api/internal/db/other"]) {
-    expect((await dispatch(new Request(`https://steam-value.test${path}`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(select) }))).status).toBe(404);
+    expect((await dispatch(new Request(`https://d1-test.invalid${path}`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(select) }))).status).toBe(404);
   }
 });
 
