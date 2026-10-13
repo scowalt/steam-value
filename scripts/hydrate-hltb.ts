@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 
 import { db } from "../src/db/client";
+import { readAllGames, recoverableManualError, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { verifyHltbMapping } from "../src/services/hltb-mapping";
 import { eq, isNull, and } from "drizzle-orm";
 
 async function main() {
-  const toVerify = await db.query.games.findMany({
+  const toVerify = await readAllGames(db, {
     where: and(isNull(games.hltbId), eq(games.isEndless, false)),
   });
 
@@ -17,22 +18,19 @@ async function main() {
   let noCandidate = 0;
 
   for (let i = 0; i < toVerify.length; i++) {
-    const game = toVerify[i];
+    const game = toVerify[i]!;
     process.stdout.write(`[${i + 1}/${toVerify.length}] ${game.name}... `);
 
     try {
       const result = await verifyHltbMapping(game.steamAppId, game.name);
 
       if (result.status === "verified" && result.hltbData) {
-        await db
-          .update(games)
-          .set({
+        await updateGame(db, eq(games.steamAppId, game.steamAppId), {
             hltbId: result.hltbData.hltbId,
             hltbMain: result.hltbData.main,
             hltbMainExtra: result.hltbData.mainExtra,
             hltbCompletionist: result.hltbData.completionist,
-          })
-          .where(eq(games.steamAppId, game.steamAppId));
+          });
         console.log(`✓ ${result.hltbData.main?.toFixed(1) || "N/A"}h`);
         verified++;
       } else if (result.status === "no_candidate") {
@@ -42,8 +40,8 @@ async function main() {
         console.log(`? ${result.status}`);
         reviewed++;
       }
-    } catch (e) {
-      console.log(`ERROR: ${e instanceof Error ? e.message : e}`);
+    } catch (error) {
+      console.log(`ERROR: ${recoverableManualError(error).message}`);
     }
 
     await new Promise((r) => setTimeout(r, 1000));
@@ -55,4 +53,4 @@ async function main() {
   console.log(`No candidate: ${noCandidate}`);
 }
 
-main();
+main().catch(reportManualError);

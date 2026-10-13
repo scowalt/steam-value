@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";
 import { eq } from "drizzle-orm";
 
 async function main() {
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   console.log(`Checking ${allGames.length} games for Early Access status...`);
 
   let earlyAccessCount = 0;
@@ -16,10 +17,7 @@ async function main() {
     const isEA = await steam.isEarlyAccess(game.steamAppId);
 
     if (isEA !== game.isEarlyAccess) {
-      await db
-        .update(games)
-        .set({ isEarlyAccess: isEA })
-        .where(eq(games.id, game.id));
+      await updateGame(db, eq(games.id, game.id), { isEarlyAccess: isEA });
 
       if (isEA) {
         earlyAccessCount++;
@@ -37,7 +35,4 @@ async function main() {
   console.log(`\nDone! Found ${earlyAccessCount} Early Access games.`);
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

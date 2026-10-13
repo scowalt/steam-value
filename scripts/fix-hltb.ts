@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { getHltbById } from "../src/scrapers/hltb";
 import { calculateValueScore } from "../src/formula";
@@ -25,7 +26,7 @@ const CORRECT_HLTB_IDS: Record<string, number> = {
 };
 
 async function fixGame(namePattern: string, correctHltbId: number) {
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   const game = allGames.find(g => g.name.includes(namePattern));
 
   if (!game) {
@@ -48,15 +49,13 @@ async function fixGame(namePattern: string, correctHltbId: number) {
     isEndless: game.isEndless,
   });
 
-  await db.update(games)
-    .set({
+  await updateGame(db, eq(games.id, game.id), {
       hltbId: correctHltbId,
       hltbMain: hltbData.main,
       hltbMainExtra: hltbData.mainExtra,
       hltbCompletionist: hltbData.completionist,
       valueScore,
-    })
-    .where(eq(games.id, game.id));
+    });
 
   console.log(`  Fixed: ${game.name} | ${hltbData.main?.toFixed(1)}h main | Value: ${valueScore?.toFixed(2) ?? 'N/A'}`);
 }
@@ -72,4 +71,4 @@ async function main() {
   console.log("\nDone!");
 }
 
-main().catch(console.error);
+main().catch(reportManualError);

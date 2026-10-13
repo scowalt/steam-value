@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { getOwnedGamesWithPlaytime } from "../src/services/steam-played";
 import { eq } from "drizzle-orm";
@@ -8,7 +9,7 @@ async function main() {
   const ownedGames = await getOwnedGamesWithPlaytime();
   console.log(`Found ${ownedGames.size} owned games in Steam library\n`);
 
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   console.log(`Updating ${allGames.length} games in database...\n`);
 
   let ownedCount = 0;
@@ -21,10 +22,7 @@ async function main() {
     const playtimeMinutes = playtime ?? null;
 
     if (game.isOwned !== isOwned || game.playtimeMinutes !== playtimeMinutes) {
-      await db
-        .update(games)
-        .set({ isOwned, playtimeMinutes })
-        .where(eq(games.id, game.id));
+      await updateGame(db, eq(games.id, game.id), { isOwned, playtimeMinutes });
       updated++;
 
       if (isOwned) {
@@ -44,4 +42,4 @@ async function main() {
   console.log(`Updated: ${updated}`);
 }
 
-main().catch(console.error);
+main().catch(reportManualError);

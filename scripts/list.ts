@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { desc, asc } from "drizzle-orm";
 import { formulaConfig } from "../src/formula/config";
@@ -8,7 +9,7 @@ async function main() {
   const sortArg = process.argv[2];
   const sortByScore = sortArg !== "--by-name";
 
-  const allGames = await db.query.games.findMany({
+  const allGames = await readAllGames(db, {
     orderBy: sortByScore ? desc(games.valueScore) : asc(games.name),
   });
 
@@ -133,7 +134,4 @@ function truncate(str: string, len: number): string {
   return str.length > len ? str.slice(0, len - 3) + "..." : str;
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

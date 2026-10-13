@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { findGame, insertGames, recoverableManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { fetchSteamData } from "../src/scrapers/steam";
 import { getHltbById } from "../src/scrapers/hltb";
@@ -120,7 +121,7 @@ if (!batch) {
 console.log(`Running batch ${batchNum}/${ALL_GAMES.length}...\n`);
 
 for (const g of batch) {
-  const existing = await db.query.games.findFirst({ where: eq(games.steamAppId, g.steamId) });
+  const existing = await findGame(db, g.steamId);
   if (existing) {
     console.log(`${g.name.padEnd(25)} ○ Exists`);
     continue;
@@ -140,7 +141,7 @@ for (const g of batch) {
       isEndless: g.endless,
     });
 
-    await db.insert(games).values({
+    await insertGames(db, [{
       steamAppId: g.steamId,
       name: steam.name,
       steamReviewScore: steam.reviewScore,
@@ -151,12 +152,13 @@ for (const g of batch) {
       hltbCompletionist: hltb?.completionist ?? null,
       valueScore: score,
       isEndless: g.endless ?? false,
-    });
+    }]);
 
     const tag = g.endless ? " [endless]" : "";
     console.log(`${steam.name.slice(0,25).padEnd(25)} ✓ ${hltb?.main?.toFixed(0) ?? "?"}h | Value: ${score?.toFixed(2) ?? "N/A"}${tag}`);
-  } catch (e: any) {
-    console.log(`${g.name.padEnd(25)} ✗ ${e.message?.slice(0,30)}`);
+  } catch (error) {
+    const failure = recoverableManualError(error);
+    console.log(`${g.name.padEnd(25)} ✗ ${failure.message.slice(0,30)}`);
   }
 
   await new Promise(r => setTimeout(r, 400));

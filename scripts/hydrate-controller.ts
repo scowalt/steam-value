@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { isNull, desc, eq } from "drizzle-orm";
 
@@ -17,7 +18,7 @@ async function fetchAppDetails(appId: number): Promise<AppDetails | null> {
   try {
     const res = await fetch(url);
     if (res.status === 429) return null;
-    const data = await res.json();
+    const data = await res.json() as Record<string, AppDetails>;
     return data[appId.toString()] || null;
   } catch {
     return null;
@@ -25,7 +26,7 @@ async function fetchAppDetails(appId: number): Promise<AppDetails | null> {
 }
 
 async function main() {
-  const nullGames = await db.query.games.findMany({
+  const nullGames = await readAllGames(db, {
     where: isNull(games.controllerSupport),
     orderBy: [desc(games.valueScore)],
   });
@@ -40,7 +41,7 @@ async function main() {
     errors = 0;
 
   for (let i = 0; i < nullGames.length; i++) {
-    const game = nullGames[i];
+    const game = nullGames[i]!;
     let appDetails: AppDetails | null = null;
     let retries = 0;
 
@@ -72,10 +73,7 @@ async function main() {
       noController++;
     }
 
-    await db
-      .update(games)
-      .set({ controllerSupport: controller })
-      .where(eq(games.id, game.id));
+    await updateGame(db, eq(games.id, game.id), { controllerSupport: controller });
     if ((i + 1) % 50 === 0)
       console.log(
         `${i + 1}/${nullGames.length} | Full: ${full}, Partial: ${partial}`
@@ -88,7 +86,4 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error("Error:", err.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

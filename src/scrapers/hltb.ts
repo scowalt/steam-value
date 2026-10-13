@@ -57,7 +57,7 @@ export async function getHltbById(hltbId: number): Promise<HltbData | null> {
       throw new Error("Could not find game data in page");
     }
 
-    const nextData: NextData = JSON.parse(nextDataMatch[1]);
+    const nextData: NextData = JSON.parse(nextDataMatch[1]!);
     const gameData = nextData.props?.pageProps?.game?.data?.game?.[0];
 
     if (!gameData) {

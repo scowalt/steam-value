@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { steam } from "../src/lib/steam-client";
 import { eq } from "drizzle-orm";
 
 async function main() {
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   console.log(`Hydrating release dates for ${allGames.length} games...`);
 
   let updated = 0;
@@ -25,10 +26,7 @@ async function main() {
     const releaseDate = await steam.getReleaseDate(game.steamAppId);
 
     if (releaseDate) {
-      await db
-        .update(games)
-        .set({ releaseDate })
-        .where(eq(games.id, game.id));
+      await updateGame(db, eq(games.id, game.id), { releaseDate });
       console.log(`  ${game.name}: ${releaseDate}`);
       updated++;
     } else {
@@ -45,7 +43,4 @@ async function main() {
   console.log(`  Not found: ${notFound}`);
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

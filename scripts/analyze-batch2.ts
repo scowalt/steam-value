@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { findGame, insertGames, readAllGames, recoverableManualError, reportManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { fetchSteamData } from "../src/scrapers/steam";
 import { getHltbById } from "../src/scrapers/hltb";
@@ -126,9 +127,7 @@ const BATCH2_GAMES: { steamId: number; hltbId: number; name: string; endless?: b
 const GAMES = BATCH2_GAMES.filter(g => typeof g.hltbId === 'number');
 
 async function addGame(steamId: number, hltbId: number, name: string, isEndless: boolean = false) {
-  const existing = await db.query.games.findFirst({
-    where: eq(games.steamAppId, steamId),
-  });
+  const existing = await findGame(db, steamId);
 
   if (existing) {
     return { status: "exists", game: existing };
@@ -152,9 +151,7 @@ async function addGame(steamId: number, hltbId: number, name: string, isEndless:
       isEndless,
     });
 
-    const result = await db
-      .insert(games)
-      .values({
+    const result = await insertGames(db, [{
         steamAppId: steamId,
         name: steamData.name,
         steamReviewScore: steamData.reviewScore,
@@ -165,12 +162,11 @@ async function addGame(steamId: number, hltbId: number, name: string, isEndless:
         hltbCompletionist: hltbData?.completionist ?? null,
         valueScore,
         isEndless,
-      })
-      .returning();
+      }]);
 
     return { status: "added", game: result[0], hltbData };
   } catch (error) {
-    return { status: "error", error: (error as Error).message };
+    return { status: "error", error: recoverableManualError(error).message };
   }
 }
 
@@ -204,9 +200,9 @@ async function main() {
   console.log(`\n${"─".repeat(60)}`);
   console.log(`Summary: ${results.added} added, ${results.exists} existing, ${results.errors} errors`);
 
-  const allGames = await db.query.games.findMany();
+  const allGames = await readAllGames(db);
   const ranked = allGames.filter(g => g.valueScore !== null && !g.isEndless);
   console.log(`\nTotal games: ${allGames.length} | Ranked: ${ranked.length} | Endless: ${allGames.filter(g => g.isEndless).length}`);
 }
 
-main().catch(console.error);
+main().catch(reportManualError);

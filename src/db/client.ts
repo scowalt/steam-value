@@ -1,4 +1,5 @@
 import { createDrizzleDb } from "./drizzle.ts";
 import { createExternalClient } from "./http.ts";
 
-export const db = createDrizzleDb(createExternalClient(process.env));
+export const client = createExternalClient(process.env);
+export const db = createDrizzleDb(client);

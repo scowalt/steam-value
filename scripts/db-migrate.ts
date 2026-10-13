@@ -5,7 +5,7 @@ import { applyMigrations, loadMigrations, MigrationError } from "../src/db/migra
 
 const usage = "Usage: bun scripts/db-migrate.ts --local --persist-to <isolated-directory>";
 
-async function main(args: string[]) {
+export async function main(args: string[]) {
   if (args.length === 1 && args[0] === "--help") {
     console.log(`${usage}\nLocal-only explicit bootstrap. Source schema is provisional; no credentials or remote D1 access.`);
     return;
@@ -32,13 +32,11 @@ async function main(args: string[]) {
   }
 }
 
-if (import.meta.main) {
-  try {
-    await main(Bun.argv.slice(2));
-  } catch (error) {
-    console.error(error instanceof MigrationError ? `${error.code}: ${error.message}`
-      : error instanceof Error && error.message === usage ? usage
-      : "LOCAL_D1_UNAVAILABLE: Isolated local D1 could not be opened or disposed");
-    process.exitCode = 1;
-  }
+export function reportMigrationError(error: unknown) {
+  console.error(error instanceof MigrationError ? `${error.code}: ${error.message}`
+    : error instanceof Error && error.message === usage ? usage
+    : "LOCAL_D1_UNAVAILABLE: Isolated local D1 could not be opened or disposed");
+  process.exitCode = 1;
 }
+
+if (import.meta.main) await main(Bun.argv.slice(2)).catch(reportMigrationError);

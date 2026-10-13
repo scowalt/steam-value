@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { readAllGames, recoverableManualError, reportManualError, updateGame } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { eq, isNull } from "drizzle-orm";
 
@@ -32,9 +33,9 @@ async function fetchSteamSpyTags(appId: number): Promise<string[] | null> {
 
 async function main() {
   const limitArg = process.argv.indexOf("--limit");
-  const limit = limitArg !== -1 ? parseInt(process.argv[limitArg + 1], 10) : undefined;
+  const limit = limitArg !== -1 ? parseInt(process.argv[limitArg + 1] ?? "", 10) : undefined;
 
-  let query = db.query.games.findMany({
+  const query = readAllGames(db, {
     where: isNull(games.tags),
     ...(limit ? { limit } : {}),
   });
@@ -57,18 +58,15 @@ async function main() {
       const tags = await fetchSteamSpyTags(game.steamAppId);
 
       if (tags && tags.length > 0) {
-        await db
-          .update(games)
-          .set({ tags: JSON.stringify(tags) })
-          .where(eq(games.id, game.id));
+        await updateGame(db, eq(games.id, game.id), { tags: JSON.stringify(tags) });
         updated++;
         console.log(`  ${game.name}: ${tags.join(", ")}`);
       } else {
         console.log(`  ${game.name}: no tags found`);
       }
     } catch (error: unknown) {
+      const msg = recoverableManualError(error).message;
       failed++;
-      const msg = error instanceof Error ? error.message : String(error);
       console.error(`  ${game.name}: ERROR - ${msg}`);
     }
 
@@ -83,7 +81,4 @@ async function main() {
   console.log(`  Skipped (no tags): ${processed - updated - failed}`);
 }
 
-main().catch((error) => {
-  console.error("Error:", error.message);
-  process.exit(1);
-});
+main().catch(reportManualError);

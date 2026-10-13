@@ -56,7 +56,7 @@ export async function getWikidataCandidate(
       return null;
     }
 
-    const binding = data.results.bindings[0];
+    const binding = data.results.bindings[0]!;
     const candidate: WikidataCandidate = {
       steamAppId,
       hltbId: parseInt(binding.hltbId.value, 10),

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { db } from "../src/db/client";
+import { findGame, insertGames, readAllGames, recoverableManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { fetchSteamData } from "../src/scrapers/steam";
 import { getHltbById } from "../src/scrapers/hltb";
@@ -62,7 +63,7 @@ console.log("Adding batch 3 games...\n");
 let added = 0, exists = 0, errors = 0;
 
 for (const g of GAMES) {
-  const existing = await db.query.games.findFirst({ where: eq(games.steamAppId, g.steamId) });
+  const existing = await findGame(db, g.steamId);
   if (existing) {
     console.log(`${g.name.slice(0,28).padEnd(28)} ○ Exists`);
     exists++;
@@ -83,7 +84,7 @@ for (const g of GAMES) {
       isEndless: g.endless,
     });
 
-    await db.insert(games).values({
+    await insertGames(db, [{
       steamAppId: g.steamId,
       name: steam.name,
       steamReviewScore: steam.reviewScore,
@@ -94,13 +95,14 @@ for (const g of GAMES) {
       hltbCompletionist: hltb?.completionist ?? null,
       valueScore: score,
       isEndless: g.endless ?? false,
-    });
+    }]);
 
     const tag = g.endless ? " [endless]" : "";
     console.log(`${steam.name.slice(0,28).padEnd(28)} ✓ ${hltb?.main?.toFixed(0) ?? "?"}h | Value: ${score?.toFixed(2) ?? "N/A"}${tag}`);
     added++;
-  } catch (e: any) {
-    console.log(`${g.name.slice(0,28).padEnd(28)} ✗ ${e.message?.slice(0,25)}`);
+  } catch (error) {
+    const failure = recoverableManualError(error);
+    console.log(`${g.name.slice(0,28).padEnd(28)} ✗ ${failure.message.slice(0,25)}`);
     errors++;
   }
 
@@ -108,5 +110,5 @@ for (const g of GAMES) {
 }
 
 console.log(`\nDone! Added: ${added}, Exists: ${exists}, Errors: ${errors}`);
-const total = await db.query.games.findMany();
+const total = await readAllGames(db);
 console.log(`Total games: ${total.length}`);

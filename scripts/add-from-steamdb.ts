@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
 
 import { db } from "../src/db/client";
+import { insertGames, readAllRows, recoverableManualError, reportManualError } from "../src/db/manual";
 import { games } from "../src/db/schema";
 import { fetchSteamData, isGame, getGameModes, getControllerSupport } from "../src/scrapers/steam";
 import { verifyHltbMapping } from "../src/services/hltb-mapping";
 import { hasEnglishSupport } from "../src/services/language-lookup";
 import { isIgnored } from "../src/services/steam-ignored";
 import { calculateValueScore } from "../src/formula";
-import { eq, inArray } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 
 interface SteamDbEntry {
   sid: number;
@@ -22,7 +23,7 @@ async function main() {
   const file = Bun.file("./src/data/steamdb-raw.json");
   const steamdbData: SteamDbEntry[] = await file.json();
 
-  const existing = await db.select({ steamAppId: games.steamAppId }).from(games);
+  const existing = await readAllRows(({ limit, offset }) => db.select({ steamAppId: games.steamAppId }).from(games).orderBy(asc(games.id)).limit(limit).offset(offset));
   const existingIds = new Set(existing.map(g => g.steamAppId));
 
   const candidates = steamdbData
@@ -80,7 +81,7 @@ async function main() {
         isEndless: gameModes.isMMO,
       });
 
-      await db.insert(games).values({
+      await insertGames(db, [{
         steamAppId: candidate.sid,
         name: steamData.name,
         steamReviewScore: steamData.reviewScore,
@@ -103,15 +104,16 @@ async function main() {
         hasLocalPvP: gameModes.hasLocalPvP,
         hasCrossplatform: gameModes.hasCrossplatform,
         isMMO: gameModes.isMMO,
-      });
+      }]);
 
       const hours = verification.hltbData.main?.toFixed(0) ?? "?";
       const ignoredTag = gameIsIgnored ? " [Ignored]" : "";
       console.log(`✓ ${steamData.reviewScore}% | ${hours}h | ${valueScore?.toFixed(0) ?? "N/A"}${ignoredTag}`);
       added++;
 
-    } catch (e: any) {
-      console.log(`✗ ${e.message?.slice(0, 30) ?? "Error"}`);
+    } catch (error) {
+      const failure = recoverableManualError(error);
+      console.log(`✗ ${failure.message.slice(0, 30)}`);
       failed++;
     }
 
@@ -123,4 +125,4 @@ async function main() {
   console.log(`Failed: ${failed}`);
 }
 
-main().catch(console.error);
+main().catch(reportManualError);
