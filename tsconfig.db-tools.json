@@ -9,6 +9,7 @@
     "src/db/local-d1.ts",
     "src/db/migrations*.ts",
     "src/db/transfer*.ts",
+    "src/db/reconciliation.test.ts",
     "scripts/db-transfer*.ts",
     "scripts/db-rehearse*.ts",
     "src/db/testing*.ts",

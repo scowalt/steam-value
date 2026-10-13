@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { createD1Client } from "./d1";
 import { DB_LIMITS, exactKeys, isDbValue, isRecord, type DbValue } from "./access";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
+import { legacySchemaStatements, OBSERVED_LEGACY_OBJECTS_FINGERPRINT } from "./schema-profile";
 
 export class TransferError extends Error {
   constructor(readonly code: "SCHEMA_DRIFT" | "UNSUPPORTED_DATA" | "FREEZE_REQUIRED" | "ARTIFACT_INVALID" | "ARTIFACT_UNSAFE" | "TARGET_NOT_EMPTY" | "INCOMPLETE_IMPORT" | "CONTENT_MISMATCH" | "BEHAVIOR_REQUIRED" | "TRANSFER_FAILED") {
@@ -56,8 +57,10 @@ export function createD1TransferSource(binding: D1Database, options: SourceOptio
   return {
     ...options, scope: options.scope ?? "isolated-local",
     async query(sql, args = []) {
-      try { return (await binding.prepare(sql).bind(...args).all<Record<string, unknown>>()).results; }
-      catch { throw new TransferError("TRANSFER_FAILED"); }
+      try {
+        const prepared = binding.prepare(sql);
+        return (await (args.length ? prepared.bind(...args) : prepared).all<Record<string, unknown>>()).results;
+      } catch { throw new TransferError("TRANSFER_FAILED"); }
     },
   };
 }
@@ -83,12 +86,18 @@ export interface SchemaTable {
   flags: Record<string, DbValue>;
 }
 export interface ReviewedSchema { objects: SchemaObject[]; tables: SchemaTable[]; sequenceObject: SchemaObject }
+export interface SchemaCompatibility {
+  profile: "prepared-d1-v2" | "observed-legacy-v1";
+  targetSchemaFingerprint: string;
+  rawDdlIdentical: boolean;
+}
 export interface SourceInventory {
   version: 1;
   source: { id: string; scope: TransferSource["scope"] };
   schemaStatus: "provisional-source-schema";
   schema: ReviewedSchema;
   schemaFingerprint: string;
+  schemaCompatibility: SchemaCompatibility;
   migrationFingerprint: string;
   migrationHistory: { id: string; checksum: string }[];
   sourceMigrationHistory: { id: string; checksum: string }[] | null;
@@ -102,6 +111,7 @@ export type TypedValue = [StorageType, DbValue];
 export interface SnapshotRow { rowid: number; values: TypedValue[] }
 export interface TableInventory {
   name: string;
+  columns: string[];
   file: string;
   rowCount: number;
   contentDigest: string;
@@ -146,28 +156,75 @@ async function readSchema(source: TransferSource) {
   return objects;
 }
 
+const tableDescriptionSql = `SELECT table_names.value AS transfer_table,
+  (SELECT json_group_array(json_object('cid',cid,'name',name,'type',type,'notnull',\"notnull\",'dflt_value',dflt_value,'pk',pk,'hidden',hidden))
+    FROM (SELECT * FROM pragma_table_xinfo(table_names.value) ORDER BY cid)) AS columns_json,
+  (SELECT json_group_array(json_object('definition',json_object('name',name,'unique',\"unique\",'origin',origin,'partial',partial),
+    'columns',json((SELECT json_group_array(json_object('seqno',seqno,'cid',cid,'name',name,'desc',\"desc\",'coll',coll,'key',key))
+      FROM (SELECT * FROM pragma_index_xinfo(indexes.name) ORDER BY seqno)))))
+    FROM (SELECT * FROM pragma_index_list(table_names.value) ORDER BY name) AS indexes) AS indexes_json,
+  (SELECT json_group_array(json_object('id',id,'seq',seq,'table',\"table\",'from',\"from\",'to',\"to\",'on_update',on_update,'on_delete',on_delete,'match',match))
+    FROM (SELECT * FROM pragma_foreign_key_list(table_names.value) ORDER BY id,seq)) AS foreign_keys_json,
+  (SELECT json_object('type',type,'ncol',ncol,'wr',wr,'strict',strict)
+    FROM pragma_table_list WHERE schema='main' AND name=table_names.value) AS flags_json
+  FROM json_each(?) AS table_names`;
+
+function schemaJson(value: unknown): unknown {
+  if (typeof value !== "string") throw new TransferError("SCHEMA_DRIFT");
+  try { return JSON.parse(value); } catch { throw new TransferError("SCHEMA_DRIFT"); }
+}
+
+function schemaRecords(value: unknown): Record<string, DbValue>[] {
+  if (!Array.isArray(value) || !value.every(isRecord)) throw new TransferError("SCHEMA_DRIFT");
+  return value.map(safeRecord);
+}
+
 async function describeTables(source: TransferSource, objects: SchemaObject[]): Promise<SchemaTable[]> {
   const tables: SchemaTable[] = [];
-  for (const object of objects.filter((entry) => entry.type === "table")) {
-    const columns = (await source.query(`SELECT * FROM pragma_table_xinfo(?) ORDER BY cid`, [object.name])).map(safeRecord);
-    const indexes = [];
-    for (const row of await source.query("SELECT * FROM pragma_index_list(?) ORDER BY name", [object.name])) {
-      if (typeof row.name !== "string") throw new TransferError("SCHEMA_DRIFT");
-      const definition = safeRecord(row);
-      delete definition.seq;
-      indexes.push({ definition, columns: (await source.query("SELECT * FROM pragma_index_xinfo(?) ORDER BY seqno", [row.name])).map(safeRecord) });
+  const selected = objects.filter((entry) => entry.type === "table");
+  const descriptions = new Map<string, Record<string, unknown>>();
+  const groupSize = 20;
+  for (let offset = 0; offset < selected.length; offset += groupSize) {
+    const group = selected.slice(offset, offset + groupSize);
+    const sql = tableDescriptionSql;
+    const args = [JSON.stringify(group.map((object) => object.name))];
+    if (Buffer.byteLength(sql) > DB_LIMITS.maxSqlBytes || Buffer.byteLength(JSON.stringify({ sql, args })) > DB_LIMITS.maxRequestBytes) throw new TransferError("SCHEMA_DRIFT");
+    const rows = await source.query(sql, args);
+    if (rows.length !== group.length) throw new TransferError("SCHEMA_DRIFT");
+    for (const row of rows) {
+      if (typeof row.transfer_table !== "string" || !group.some((object) => object.name === row.transfer_table) || descriptions.has(row.transfer_table)) throw new TransferError("SCHEMA_DRIFT");
+      descriptions.set(row.transfer_table, row);
     }
-    const flags = (await source.query("SELECT type, ncol, wr, strict FROM pragma_table_list WHERE schema = 'main' AND name = ?", [object.name])).map(safeRecord)[0];
-    if (!flags) throw new TransferError("SCHEMA_DRIFT");
-    tables.push({ name: object.name, columns, indexes, foreignKeys: (await source.query("SELECT * FROM pragma_foreign_key_list(?) ORDER BY id, seq", [object.name])).map(safeRecord), flags });
+  }
+  for (const object of selected) {
+    const row = descriptions.get(object.name);
+    if (!row) throw new TransferError("SCHEMA_DRIFT");
+    const columns = schemaRecords(schemaJson(row.columns_json));
+    const rawIndexes = schemaJson(row.indexes_json);
+    if (!Array.isArray(rawIndexes)) throw new TransferError("SCHEMA_DRIFT");
+    const indexes = rawIndexes.map((index: unknown) => {
+      if (!isRecord(index) || !isRecord(index.definition)) throw new TransferError("SCHEMA_DRIFT");
+      return { definition: safeRecord(index.definition), columns: schemaRecords(index.columns) };
+    });
+    const flags = schemaJson(row.flags_json);
+    if (!isRecord(flags)) throw new TransferError("SCHEMA_DRIFT");
+    tables.push({ name: object.name, columns, indexes, foreignKeys: schemaRecords(schemaJson(row.foreign_keys_json)), flags: safeRecord(flags) });
   }
   return tables;
 }
 
-let reviewed: Promise<{ schema: ReviewedSchema; excluded: SchemaObject[]; history: { id: string; checksum: string }[]; ledger: Record<string, unknown>[] }> | undefined;
+interface SchemaReview {
+  schema: ReviewedSchema;
+  legacySchema: ReviewedSchema;
+  excluded: SchemaObject[];
+  history: { id: string; checksum: string }[];
+  ledger: Record<string, unknown>[];
+}
+
+let reviewed: Promise<SchemaReview> | undefined;
 async function reviewedSchema() {
   return reviewed ??= (async () => {
-    const runtime = await createLocalD1();
+    const runtime = await createLocalD1({ databaseNames: ["LEGACY_PROFILE"] });
     try {
       const binding = runtime.binding;
       const migrations = await loadMigrations();
@@ -177,13 +234,36 @@ async function reviewedSchema() {
       const excluded = objects.filter((object) => ["_cf_METADATA", "steam_value_migrations", "sqlite_autoindex_steam_value_migrations_1"].includes(object.name));
       const application = objects.filter((object) => !excluded.includes(object) && object.name !== "sqlite_sequence");
       const sequenceObject = objects.find((object) => object.name === "sqlite_sequence")!;
+      const legacyBinding = await runtime.getBinding("LEGACY_PROFILE");
+      await legacyBinding.batch((await legacySchemaStatements()).map((sql) => legacyBinding.prepare(sql)));
+      const legacy = createD1TransferSource(legacyBinding, { id: "reviewed-legacy-schema", freezeRecord: undefined! });
+      const legacyObjects = (await readSchema(legacy)).filter((object) => !excluded.some((entry) => same(entry, object)) && object.name !== "sqlite_sequence");
       return {
-        schema: { objects: application, tables: await describeTables(source, application), sequenceObject }, excluded,
+        schema: { objects: application, tables: await describeTables(source, application), sequenceObject },
+        legacySchema: { objects: legacyObjects, tables: await describeTables(legacy, legacyObjects), sequenceObject }, excluded,
         history: migrations.map(({ id, checksum }) => ({ id, checksum })),
         ledger: await source.query("SELECT id, checksum, schema_json FROM steam_value_migrations ORDER BY id"),
       };
     } finally { await runtime.dispose(); }
   })();
+}
+
+async function reviewedObjects(objects: SchemaObject[], expected: SchemaReview): Promise<boolean> {
+  return same(objects, expected.schema.objects) || same(objects, expected.legacySchema.objects) ||
+    await migrationChecksum(JSON.stringify(objects)) === OBSERVED_LEGACY_OBJECTS_FINGERPRINT;
+}
+
+async function schemaCompatibility(schema: ReviewedSchema, expected: SchemaReview): Promise<SchemaCompatibility> {
+  if (!isRecord(schema) || !exactKeys(schema, ["objects", "tables", "sequenceObject"]) || Object.keys(schema).length !== 3) throw new TransferError("SCHEMA_DRIFT");
+  const targetSchemaFingerprint = await migrationChecksum(JSON.stringify(expected.schema));
+  if (same(schema, expected.schema)) return { profile: "prepared-d1-v2", targetSchemaFingerprint, rawDdlIdentical: true };
+  if (same(schema.tables, expected.legacySchema.tables) && same(schema.sequenceObject, expected.legacySchema.sequenceObject)) {
+    const fingerprint = await migrationChecksum(JSON.stringify(schema.objects));
+    if (fingerprint === OBSERVED_LEGACY_OBJECTS_FINGERPRINT || same(schema.objects, expected.legacySchema.objects)) {
+      return { profile: "observed-legacy-v1", targetSchemaFingerprint, rawDdlIdentical: false };
+    }
+  }
+  throw new TransferError("SCHEMA_DRIFT");
 }
 
 async function saveSchemaDrift(source: TransferSource, directory: string) {
@@ -207,10 +287,12 @@ async function inspectSource(source: TransferSource, onRow?: (table: string, lin
   const excludedMetadata = objects.filter((object) => expected.excluded.some((entry) => same(entry, object)));
   const application = objects.filter((object) => !excludedMetadata.includes(object) && object.name !== "sqlite_sequence");
   const sequenceObject = objects.find((object) => object.name === "sqlite_sequence");
-  if (!same(application, expected.schema.objects) || !same(sequenceObject, expected.schema.sequenceObject)) throw new TransferError("SCHEMA_DRIFT");
+  if (!same(sequenceObject, expected.schema.sequenceObject) || !await reviewedObjects(application, expected)) throw new TransferError("SCHEMA_DRIFT");
   const schema: ReviewedSchema = { objects: application, tables: await describeTables(source, application), sequenceObject: sequenceObject! };
-  if (!same(schema, expected.schema)) throw new TransferError("SCHEMA_DRIFT");
+  const compatibility = await schemaCompatibility(schema, expected);
   const hasHistory = excludedMetadata.some((object) => object.name === "steam_value_migrations");
+  const hasHistoryIndex = excludedMetadata.some((object) => object.name === "sqlite_autoindex_steam_value_migrations_1");
+  if (hasHistory !== hasHistoryIndex || (hasHistory && compatibility.profile !== "prepared-d1-v2")) throw new TransferError("SCHEMA_DRIFT");
   const ledger = hasHistory ? await source.query("SELECT id, checksum, schema_json FROM steam_value_migrations ORDER BY id") : null;
   if (ledger !== null && !same(ledger, expected.ledger)) throw new TransferError("SCHEMA_DRIFT");
   const sourceMigrationHistory = ledger === null ? null : ledger.map((row) => {
@@ -218,12 +300,12 @@ async function inspectSource(source: TransferSource, onRow?: (table: string, lin
     return { id: row.id, checksum: row.checksum };
   });
   if (sourceMigrationHistory !== null && !same(sourceMigrationHistory, expected.history)) throw new TransferError("SCHEMA_DRIFT");
-  const tables = await scanTables(source, schema, onRow);
+  const tables = await scanTables(source, expected.schema, onRow);
   const sequence = await readSequence(source);
   if (tables.find((table) => table.name === "games")!.rowCount > 0 && sequence.length === 0) throw new TransferError("UNSUPPORTED_DATA");
   return {
     version: 1, source: { id: source.id, scope: source.scope }, schemaStatus: "provisional-source-schema",
-    schema, schemaFingerprint: await migrationChecksum(JSON.stringify(schema)),
+    schema, schemaFingerprint: await migrationChecksum(JSON.stringify(schema)), schemaCompatibility: compatibility,
     migrationFingerprint: await migrationChecksum(JSON.stringify(expected.history)), migrationHistory: expected.history,
     sourceMigrationHistory, excludedMetadata,
     tables, sequence,
@@ -265,7 +347,7 @@ function scalar(type: unknown, value: unknown): TypedValue {
 }
 
 function tableSummary(table: SchemaTable): TableInventory {
-  return { name: table.name, file: `${table.name}.jsonl`, rowCount: 0, contentDigest: "", bytes: 0, maxRowBytes: 0, maxScalarBytes: 0, storageTypes: table.columns.map(() => ({})) };
+  return { name: table.name, columns: table.columns.map((column) => String(column.name)), file: `${table.name}.jsonl`, rowCount: 0, contentDigest: "", bytes: 0, maxRowBytes: 0, maxScalarBytes: 0, storageTypes: table.columns.map(() => ({})) };
 }
 
 function recordRow(summary: TableInventory, row: SnapshotRow) {
@@ -454,13 +536,13 @@ async function openSnapshot(input: Snapshot | string): Promise<Snapshot> {
   const value = await readJson(join(directory, "manifest.json"));
   const receipt = await readJson(join(directory, "export-receipt.json"));
   const expected = await reviewedSchema();
-  const keys = ["version", "source", "schemaStatus", "schema", "schemaFingerprint", "migrationFingerprint", "migrationHistory", "sourceMigrationHistory", "excludedMetadata", "tables", "sequence", "snapshotId", "createdAt", "freezeRecord"];
+  const keys = ["version", "source", "schemaStatus", "schema", "schemaFingerprint", "schemaCompatibility", "migrationFingerprint", "migrationHistory", "sourceMigrationHistory", "excludedMetadata", "tables", "sequence", "snapshotId", "createdAt", "freezeRecord"];
   if (!isRecord(value) || !exactKeys(value, keys) || Object.keys(value).length !== keys.length || value.version !== 1 ||
     typeof value.snapshotId !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.snapshotId) ||
     typeof value.createdAt !== "number" || !Number.isSafeInteger(value.createdAt) || value.createdAt <= 0 ||
     !isRecord(value.source) || typeof value.source.id !== "string" || !["isolated-local", "approved-operator"].includes(String(value.source.scope)) ||
-    value.schemaStatus !== "provisional-source-schema" || !same(value.schema, expected.schema) ||
-    value.schemaFingerprint !== await migrationChecksum(JSON.stringify(expected.schema)) ||
+    value.schemaStatus !== "provisional-source-schema" ||
+    value.schemaFingerprint !== await migrationChecksum(JSON.stringify(value.schema)) ||
     !same(value.migrationHistory, expected.history) || value.migrationFingerprint !== await migrationChecksum(JSON.stringify(expected.history)) ||
     !(value.sourceMigrationHistory === null || same(value.sourceMigrationHistory, expected.history)) ||
     !Array.isArray(value.excludedMetadata) || !value.excludedMetadata.every((object) => expected.excluded.some((entry) => same(entry, object))) ||
@@ -468,9 +550,18 @@ async function openSnapshot(input: Snapshot | string): Promise<Snapshot> {
     !Array.isArray(value.sequence) || value.sequence.length > 1 || value.sequence.some((entry) => !isRecord(entry) || entry.name !== "games" || typeof entry.seq !== "number" || !Number.isSafeInteger(entry.seq) || entry.seq < 0) ||
     !isRecord(receipt) || receipt.status !== "complete" || receipt.snapshotId !== value.snapshotId || receipt.manifestDigest !== await migrationChecksum(JSON.stringify(value))) throw new TransferError("ARTIFACT_INVALID");
   const manifest = value as unknown as SnapshotManifest;
+  let compatibility: SchemaCompatibility;
+  try { compatibility = await schemaCompatibility(manifest.schema, expected); }
+  catch { throw new TransferError("ARTIFACT_INVALID"); }
+  const hasHistory = manifest.excludedMetadata.some((object) => object.name === "steam_value_migrations");
+  const hasHistoryIndex = manifest.excludedMetadata.some((object) => object.name === "sqlite_autoindex_steam_value_migrations_1");
+  if (!same(compatibility, manifest.schemaCompatibility) || hasHistory !== hasHistoryIndex ||
+    hasHistory !== (manifest.sourceMigrationHistory !== null) || (hasHistory && compatibility.profile !== "prepared-d1-v2") ||
+    new Set(manifest.excludedMetadata.map((object) => object.name)).size !== manifest.excludedMetadata.length) throw new TransferError("ARTIFACT_INVALID");
   assertFreeze({ ...manifest.source, freezeRecord: manifest.freezeRecord, query: async () => [] });
   for (const [index, table] of manifest.tables.entries()) {
     if (table.name !== expected.schema.tables[index]!.name || table.file !== `${table.name}.jsonl` ||
+      !same(table.columns, expected.schema.tables[index]!.columns.map((column) => column.name)) ||
       !Number.isSafeInteger(table.rowCount) || table.rowCount < 0 || !Number.isSafeInteger(table.bytes) || table.bytes < 0 ||
       !/^[a-f0-9]{64}$/.test(table.contentDigest) || !Array.isArray(table.storageTypes) || table.storageTypes.length !== expected.schema.tables[index]!.columns.length) throw new TransferError("ARTIFACT_INVALID");
   }
@@ -520,7 +611,7 @@ async function* artifactRows(snapshot: Snapshot, table: SchemaTable): AsyncGener
 
 async function verifyArtifact(input: Snapshot | string) {
   const snapshot = await openSnapshot(input);
-  for (const table of snapshot.manifest.schema.tables) for await (const _row of artifactRows(snapshot, table)) {}
+  for (const table of (await reviewedSchema()).schema.tables) for await (const _row of artifactRows(snapshot, table)) {}
   return snapshot;
 }
 
@@ -537,33 +628,48 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     receipt.snapshotId = snapshot.manifest.snapshotId;
     receipt.manifestDigest = await migrationChecksum(JSON.stringify(snapshot.manifest));
     const before = await inventorySource(target);
-    if (before.sourceMigrationHistory === null) throw new TransferError("SCHEMA_DRIFT");
+    if (before.sourceMigrationHistory === null || before.schemaCompatibility.profile !== "prepared-d1-v2") throw new TransferError("SCHEMA_DRIFT");
     if (before.tables.some((table) => table.rowCount !== 0) || before.sequence.length) throw new TransferError("TARGET_NOT_EMPTY");
     await save();
-    for (const table of snapshot.manifest.schema.tables) {
+    for (const table of (await reviewedSchema()).schema.tables) {
       receipt.phase = "rows";
       receipt.confirmedRows[table.name] = 0;
-      let batch: { sql: string; args: DbValue[] }[] = [];
+      type ImportStatement = { sql: string; args: DbValue[]; rows: number };
+      let batch: ImportStatement[] = [];
+      let pending: ImportStatement | undefined;
       let bytes = 0;
+      const prefix = `INSERT INTO ${quote(table.name)} (rowid,${table.columns.map((column) => quote(String(column.name))).join(",")}) VALUES `;
+      const statementBytes = (statement: ImportStatement) => Buffer.byteLength(JSON.stringify({ sql: statement.sql, args: statement.args }));
       const flush = async () => {
         if (!batch.length) return;
         if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
         receipt.writeOutcome = "partial-or-unknown";
         await save();
         await target.binding.batch(batch.map((statement) => target.binding.prepare(statement.sql).bind(...statement.args)));
-        receipt.confirmedRows[table.name]! += batch.length;
+        receipt.confirmedRows[table.name]! += batch.reduce((count, statement) => count + statement.rows, 0);
         batch = []; bytes = 0;
         await save();
+      };
+      const enqueue = async () => {
+        if (!pending) return;
+        const size = statementBytes(pending);
+        if (batch.length >= TRANSFER_LIMITS.batchStatements || bytes + size > DB_LIMITS.maxRequestBytes - 4096) await flush();
+        batch.push(pending); bytes += size; pending = undefined;
       };
       for await (const row of artifactRows(snapshot, table)) {
         const args: DbValue[] = [row.rowid, ...row.values.map((entry) => entry[1])];
         const binds = ["CAST(? AS INTEGER)", ...row.values.map(([type]) => type === "integer" ? "CAST(? AS INTEGER)" : type === "real" ? "CAST(? AS REAL)" : "?")];
-        const sql = `INSERT INTO ${quote(table.name)} (rowid,${table.columns.map((column) => quote(String(column.name))).join(",")}) VALUES (${binds.join(",")})`;
-        const size = Buffer.byteLength(JSON.stringify({ sql, args }));
-        if (args.length > DB_LIMITS.maxParams || Buffer.byteLength(sql) > DB_LIMITS.maxSqlBytes || size > DB_LIMITS.maxRequestBytes) throw new TransferError("UNSUPPORTED_DATA");
-        if (batch.length >= TRANSFER_LIMITS.batchStatements || bytes + size > DB_LIMITS.maxRequestBytes - 4096) await flush();
-        batch.push({ sql, args }); bytes += size;
+        const values = `(${binds.join(",")})`;
+        const single: ImportStatement = { sql: prefix + values, args, rows: 1 };
+        if (args.length > DB_LIMITS.maxParams || Buffer.byteLength(single.sql) > DB_LIMITS.maxSqlBytes || statementBytes(single) > DB_LIMITS.maxRequestBytes - 4096) throw new TransferError("UNSUPPORTED_DATA");
+        let combined = pending ? { sql: `${pending.sql},${values}`, args: [...pending.args, ...args], rows: pending.rows + 1 } : single;
+        if (combined.args.length > DB_LIMITS.maxParams || Buffer.byteLength(combined.sql) > DB_LIMITS.maxSqlBytes || statementBytes(combined) > DB_LIMITS.maxRequestBytes - 4096) {
+          await enqueue();
+          combined = single;
+        }
+        pending = combined;
       }
+      await enqueue();
       await flush();
     }
     if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
@@ -572,6 +678,8 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     const sequence = snapshot.manifest.sequence[0];
     const generated = await readSequence(target);
     if (sequence) {
+      receipt.writeOutcome = "partial-or-unknown";
+      await save();
       await target.binding.batch([generated.length
         ? target.binding.prepare("UPDATE sqlite_sequence SET seq = CAST(? AS INTEGER) WHERE name = 'games'").bind(sequence.seq)
         : target.binding.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('games', CAST(? AS INTEGER))").bind(sequence.seq)]);
@@ -594,6 +702,8 @@ export interface ValidationReport {
   snapshotId: string;
   tableCount: number;
   schemaFingerprint: string;
+  sourceSchemaFingerprint: string;
+  schemaCompatibility: SchemaCompatibility;
   behaviorChecks: string[];
 }
 
@@ -609,8 +719,8 @@ export async function validateSnapshot(target: TransferTarget, input: Snapshot |
   try {
     const compare = async () => {
       const inventory = await inventorySource(target);
-      if (!same(inventory.schema, snapshot.manifest.schema) || !same(inventory.tables, snapshot.manifest.tables) ||
-        !same(inventory.sequence, snapshot.manifest.sequence) || inventory.sourceMigrationHistory === null) throw new TransferError("CONTENT_MISMATCH");
+      if (inventory.schemaCompatibility.profile !== "prepared-d1-v2" || inventory.schemaFingerprint !== snapshot.manifest.schemaCompatibility.targetSchemaFingerprint ||
+        !same(inventory.tables, snapshot.manifest.tables) || !same(inventory.sequence, snapshot.manifest.sequence) || inventory.sourceMigrationHistory === null) throw new TransferError("CONTENT_MISMATCH");
     };
     await compare();
     if (!target.verifyBehavior) throw new TransferError("BEHAVIOR_REQUIRED");
@@ -620,7 +730,9 @@ export async function validateSnapshot(target: TransferTarget, input: Snapshot |
     await compare();
     receipt.status = "validated"; receipt.validation = { status: "passed", behaviorChecks: checks };
     await writeJson(target.receiptPath, receipt);
-    return { status: "validated", snapshotId: snapshot.manifest.snapshotId, tableCount: snapshot.manifest.tables.length, schemaFingerprint: snapshot.manifest.schemaFingerprint, behaviorChecks: checks };
+    return { status: "validated", snapshotId: snapshot.manifest.snapshotId, tableCount: snapshot.manifest.tables.length,
+      schemaFingerprint: snapshot.manifest.schemaCompatibility.targetSchemaFingerprint, sourceSchemaFingerprint: snapshot.manifest.schemaFingerprint,
+      schemaCompatibility: snapshot.manifest.schemaCompatibility, behaviorChecks: checks };
   } catch (error) {
     receipt.status = "imported"; receipt.validation = { status: "failed", errorCode: error instanceof TransferError ? error.code : "TRANSFER_FAILED" };
     await writeJson(target.receiptPath, receipt).catch(() => {});
@@ -657,7 +769,7 @@ export async function prepareRollback(target: TransferSource, baselineSnapshot: 
   const deltaFile = await privateFile(join(current.directory, "reconciliation.jsonl"), true);
   const hash = new Bun.CryptoHasher("sha256");
   try {
-    for (const table of baseline.manifest.schema.tables) {
+    for (const table of (await reviewedSchema()).schema.tables) {
       const counts = receipt.delta[table.name] = { added: 0, deleted: 0, changed: 0 };
       const previousRows = artifactRows(baseline, table);
       const currentRows = artifactRows(current, table);

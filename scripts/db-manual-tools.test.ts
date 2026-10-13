@@ -26,10 +26,10 @@ test("the historical setup entrypoint explicitly bootstraps all seven tables wit
   const args = ["--local", "--persist-to", await scratch()];
   const first = await run("setup-worker-db", args);
   expect(first.exitCode).toBe(0);
-  expect(JSON.parse(first.stdout)).toMatchObject({ scope: "isolated-local", applied: ["0001_complete_schema.sql"] });
+  expect(JSON.parse(first.stdout)).toMatchObject({ scope: "isolated-local", applied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"] });
   const second = await run("setup-worker-db", args);
   expect(second.exitCode).toBe(0);
-  expect(JSON.parse(second.stdout)).toMatchObject({ applied: [], alreadyApplied: ["0001_complete_schema.sql"] });
+  expect(JSON.parse(second.stdout)).toMatchObject({ applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"] });
 });
 
 test("offline generation appends a validated immutable D1 migration without credentials or modifying prior history", async () => {

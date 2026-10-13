@@ -40,7 +40,7 @@ test("explicit CLI inventory/export/import uses checksum bootstrap and protected
   const inventory = await run(["inventory", ...common, "--destination", inventoryDirectory]);
   expect(inventory).toMatchObject({ exitCode: 0, stderr: "" });
   expect(JSON.parse(inventory.stdout)).toMatchObject({ scope: "isolated-local", operation: "inventory", status: "complete" });
-  expect(JSON.parse(await Bun.file(join(inventoryDirectory, "inventory.json")).text()).schema.tables).toHaveLength(7);
+  expect(JSON.parse(await Bun.file(join(inventoryDirectory, "inventory.json")).text()).schema.tables).toHaveLength(8);
   const snapshotDirectory = join(parent, "snapshot");
   expect(await run(["export", ...common, "--destination", snapshotDirectory])).toMatchObject({ exitCode: 0, stderr: "" });
   const receipt = join(parent, "import.json");
@@ -76,7 +76,7 @@ test("native transfer persistence interoperates with explicit migration reapplic
   await seedNativeSource();
   const reapplied = await run(["--local", "--persist-to", sourceDirectory], "scripts/db-migrate.ts");
   expect(reapplied.exitCode).toBe(0);
-  expect(JSON.parse(reapplied.stdout)).toMatchObject({ applied: [], alreadyApplied: ["0001_complete_schema.sql"] });
+  expect(JSON.parse(reapplied.stdout)).toMatchObject({ applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"] });
   const freezeRecord = {
     mode: "frozen-writers" as const, sourceId: "persistent-source", recordId: "synthetic-persistence-freeze", frozenAt: 1700000000,
     evidence: "isolated native source after writer disposal and explicit migration reapplication", writersPaused: ["fixture"], writersDrained: ["fixture"], manualWritersDrained: true as const, holdsUntilRelease: true as const,
