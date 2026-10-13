@@ -1,4 +1,4 @@
-import { Miniflare } from "miniflare";
+import { createLocalD1 } from "./local-d1";
 import { open } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -31,11 +31,7 @@ export async function inspectDatabase(client: DbClient, options: InspectionOptio
 }
 
 export function openLocalD1(persistTo?: string) {
-  return new Miniflare({
-    modules: true, script: "export default { fetch() { return new Response(null, { status: 404 }); } }",
-    d1Databases: ["DB"], d1Persist: persistTo ? join(resolve(persistTo), "v3", "d1") : false,
-    cf: false, host: "127.0.0.1", port: 0,
-  });
+  return createLocalD1(persistTo ? { persistTo: resolve(persistTo) } : {});
 }
 
 export async function generateMigration(name: string, sql: string, directory = resolve("migrations")) {
@@ -48,10 +44,10 @@ export async function generateMigration(name: string, sql: string, directory = r
   if (history.length === 0 || number > 9999) throw new MigrationError("INVALID_MIGRATION", "Generation requires a complete existing migration history");
   const migrationId = `${String(number).padStart(4, "0")}_${name}.sql`;
   const candidate = { id: migrationId, sql, checksum: await migrationChecksum(sql) };
-  const runtime = openLocalD1();
+  const runtime = await openLocalD1();
   let schemaFingerprint: string;
   try {
-    const report = await applyMigrations(await runtime.getD1Database("DB"), [...history, candidate]);
+    const report = await applyMigrations(runtime.binding, [...history, candidate]);
     schemaFingerprint = report.schemaFingerprint;
   } finally {
     await runtime.dispose();

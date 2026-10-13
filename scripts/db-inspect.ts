@@ -38,9 +38,9 @@ export async function main(args: string[]) {
     console.log(JSON.stringify({ scope: "application", ...await inspectDatabase(createExternalClient(process.env), inspection) }));
     return;
   }
-  const runtime = openLocalD1(persistTo);
+  const runtime = await openLocalD1(persistTo);
   try {
-    console.log(JSON.stringify({ scope: "isolated-local", ...await inspectDatabase(createD1Client(await runtime.getD1Database("DB")), inspection) }));
+    console.log(JSON.stringify({ scope: "isolated-local", ...await inspectDatabase(createD1Client(runtime.binding), inspection) }));
   } finally { await runtime.dispose(); }
 }
 

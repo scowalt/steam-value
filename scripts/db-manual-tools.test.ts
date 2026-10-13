@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { generateMigration } from "../src/db/admin";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -72,4 +73,16 @@ test.each(["setup-worker-db", "db-generate", "db-inspect"])("%s rejects implicit
 
 test("application inspection fails closed without its application/Access configuration", async () => {
   expect(await run("db-inspect", ["--application"])).toMatchObject({ exitCode: 1, stdout: "", stderr: expect.stringContaining("NOT_CONFIGURED (not-applied)") });
+});
+
+test("completed direct D1 generation leaves later operator processes able to report output and exit", async () => {
+  const directory = await scratch();
+  const history = join(directory, "migrations");
+  await Bun.write(join(history, "0001_complete_schema.sql"), await Bun.file("migrations/0001_complete_schema.sql").text());
+  expect((await generateMigration("ownership_check", "ALTER TABLE games ADD COLUMN ownership_check TEXT;", history)).migrationId).toBe("0002_ownership_check.sql");
+  for (let operation = 0; operation < 10; operation++) {
+    expect(await run("db-migrate", ["--remote"])).toEqual({
+      exitCode: 1, stdout: "", stderr: "Usage: bun scripts/db-migrate.ts --local --persist-to <isolated-directory>\n",
+    });
+  }
 });
