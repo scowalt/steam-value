@@ -43,18 +43,22 @@ test("browser-backed Steam Status publishes markers and preserves maximum record
   expect(await getSyncState(client)).toMatchObject({ lastAttemptAt: start, lastSuccessAt: start, lastError: null, isRunning: false, lockExpiresAt: null, ownedCount: 2, ignoredCount: 1, wishlistCount: 1, gamesUpdated: 4 });
 });
 
-test("Steam Status stops after a lost game-write reply without clearing its uncertain lock or advertising success", async () => {
+test.each(["unknown", "committed"])("Steam Status stops after a game-write error with %s outcome without clearing its uncertain lock or advertising success", async (outcome) => {
   await client.execute("INSERT INTO games (steam_app_id, name) VALUES (20, 'Newly owned')");
   const uncertain = createHttpClient({ ...harness.clientConfig, fetch: async (request) => {
     const body = validateWireRequest(await request.clone().json());
     const response = await harness.fetch(request);
     if (body.op === "batch" && body.mode === "write") {
       await response.body?.cancel();
-      throw new Error("secret-url-and-SQL-parameters-must-not-escape");
+      if (outcome === "unknown") throw new Error("secret-url-and-SQL-parameters-must-not-escape");
+      return Response.json({ version: 1, ok: false, requestId: request.headers.get("X-Steam-Value-Request-Id"), error: { code: "RESULT_LIMIT", message: "Database result exceeds supported limits", outcome: "committed" } }, { status: 413 });
     }
     return response;
   } });
-  await expect(syncSteamStatus(uncertain, {}, { source: source(), now: () => start })).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN", outcome: "unknown", message: "Database write outcome is unknown; inspect state before resuming" });
+  await expect(syncSteamStatus(uncertain, {}, { source: source(), now: () => start })).rejects.toMatchObject({
+    code: outcome === "unknown" ? "OUTCOME_UNKNOWN" : "RESULT_LIMIT", outcome,
+    message: outcome === "unknown" ? "Database write outcome is unknown; inspect state before resuming" : "Database result exceeds supported limits",
+  });
   expect((await client.execute("SELECT is_owned, playtime_minutes FROM games WHERE steam_app_id=20")).rows).toEqual([{ is_owned: 1, playtime_minutes: 60 }]);
   expect(await getSyncState(client)).toMatchObject({ lastSuccessAt: null, lastError: null, isRunning: true, lockExpiresAt: start + 900, gamesUpdated: 0 });
 });

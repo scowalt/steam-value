@@ -79,6 +79,25 @@ test.each(["unknown", "committed"])("offer refresh stops after a %s publication 
   expect(await run()).toMatchObject({ skipped: true });
 });
 
+test.each(["unknown", "committed"])("a mapping publication error with %s outcome preserves its lease and previous success for reconciliation", async (outcome) => {
+  await run();
+  now = start + 604800;
+  const uncertain = createHttpClient({ ...harness.clientConfig, fetch: async (request) => {
+    const body = validateWireRequest(await request.clone().json());
+    const response = await harness.fetch(request);
+    if (body.op === "batch" && body.statements.some((statement) => statement.sql.includes("INSERT INTO itad_game_map"))) {
+      await response.body?.cancel();
+      if (outcome === "unknown") throw new Error("private mapping parameters and credentials");
+      return Response.json({ version: 1, ok: false, requestId: request.headers.get("X-Steam-Value-Request-Id"), error: { code: "RESULT_LIMIT", message: "Database result exceeds supported limits", outcome: "committed" } }, { status: 413 });
+    }
+    return response;
+  } });
+  await expect(run(source({ lookup: async (ids) => new Map(ids.map((id) => [id, null])) }), uncertain)).rejects.toMatchObject({ code: outcome === "unknown" ? "OUTCOME_UNKNOWN" : "RESULT_LIMIT", outcome });
+  expect((await getGameDeals(client, [2], now)).get(2)).toEqual({ status: "unmapped", checkedAt: start + 604800, offers: [] });
+  expect((await client.execute("SELECT steam_app_id FROM game_deal_cache")).rows).toEqual([]);
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start, lastError: null, gamesChecked: 0, isRunning: true });
+});
+
 test("an abandoned mapping writer cannot delete replacement offers and detects its rejected mapping publication", async () => {
   const ready = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
