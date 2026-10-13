@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-import { createExternalClient } from "../src/db/http";
+import { createExternalClient } from "../src/db/http.ts";
+import { toDbError, type DbClient } from "../src/db/access.ts";
 import { ItadClient } from "../src/services/itad-client";
-import { refreshGameDeals } from "../src/services/deal-refresh";
+import { OfferRefreshError, refreshGameDeals } from "../src/services/deal-refresh";
 
 const args = process.argv.slice(2);
 let limit: number | undefined;
@@ -11,17 +12,18 @@ if (args.length) {
   }
   limit = Number(args[1]);
 }
-const apiKey = process.env.ITAD_API_KEY;
-if (!apiKey) throw new Error("Missing ITAD_API_KEY");
-const client = createExternalClient(process.env);
+let client: DbClient | undefined;
 try {
+  const apiKey = process.env.ITAD_API_KEY;
+  if (!apiKey) throw new OfferRefreshError("Missing ITAD_API_KEY");
+  client = createExternalClient(process.env);
   const result = await refreshGameDeals(client, new ItadClient(apiKey), {
     limit, onProgress: (message) => console.log(`[Offers] ${message}`),
   });
   console.log(`[Offers] ${result.skipped ? "Already running" : "Complete"}: ${JSON.stringify(result)}`);
 } catch (error) {
-  console.error(`[Offers] ${error instanceof Error ? error.message : "Refresh failed"}`);
+  console.error(`[Offers] ${error instanceof OfferRefreshError ? error.message : toDbError(error).message}`);
   process.exitCode = 1;
 } finally {
-  client.close();
+  client?.close();
 }
