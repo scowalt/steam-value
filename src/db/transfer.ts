@@ -630,10 +630,11 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     const before = await inventorySource(target);
     if (before.sourceMigrationHistory === null || before.schemaCompatibility.profile !== "prepared-d1-v2") throw new TransferError("SCHEMA_DRIFT");
     if (before.tables.some((table) => table.rowCount !== 0) || before.sequence.length) throw new TransferError("TARGET_NOT_EMPTY");
+    const tables = (await reviewedSchema()).schema.tables;
+    receipt.confirmedRows = Object.fromEntries(tables.map((table) => [table.name, 0]));
     await save();
-    for (const table of (await reviewedSchema()).schema.tables) {
+    for (const table of tables) {
       receipt.phase = "rows";
-      receipt.confirmedRows[table.name] = 0;
       type ImportStatement = { sql: string; args: DbValue[]; rows: number };
       let batch: ImportStatement[] = [];
       let pending: ImportStatement | undefined;
@@ -645,10 +646,14 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
         if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
         receipt.writeOutcome = "partial-or-unknown";
         await save();
-        await target.binding.batch(batch.map((statement) => target.binding.prepare(statement.sql).bind(...statement.args)));
+        const statements = batch.map((statement) => target.binding.prepare(statement.sql).bind(...statement.args));
+        if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
+        await target.binding.batch(statements);
         receipt.confirmedRows[table.name]! += batch.reduce((count, statement) => count + statement.rows, 0);
+        if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
         batch = []; bytes = 0;
         await save();
+        if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
       };
       const enqueue = async () => {
         if (!pending) return;
@@ -675,20 +680,27 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     receipt.phase = "sequence";
     await save();
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     const sequence = snapshot.manifest.sequence[0];
     const generated = await readSequence(target);
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     if (sequence) {
       receipt.writeOutcome = "partial-or-unknown";
       await save();
-      await target.binding.batch([generated.length
+      const statements = [generated.length
         ? target.binding.prepare("UPDATE sqlite_sequence SET seq = CAST(? AS INTEGER) WHERE name = 'games'").bind(sequence.seq)
-        : target.binding.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('games', CAST(? AS INTEGER))").bind(sequence.seq)]);
+        : target.binding.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES ('games', CAST(? AS INTEGER))").bind(sequence.seq)];
+      if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
+      await target.binding.batch(statements);
+      if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     } else if (generated.length) throw new TransferError("ARTIFACT_INVALID");
     const imported = await inventorySource(target);
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     if (!same(imported.tables, snapshot.manifest.tables) || !same(imported.sequence, snapshot.manifest.sequence)) throw new TransferError("CONTENT_MISMATCH");
-    receipt.status = "imported"; receipt.phase = "complete"; receipt.writeOutcome = "imported";
-    await save();
-    return receipt;
+    const complete: ImportReceipt = { ...receipt, status: "imported", phase: "complete", writeOutcome: "imported" };
+    await writeJson(target.receiptPath, complete);
+    if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
+    return complete;
   } catch (error) {
     receipt.status = "incomplete"; receipt.phase = "failed";
     receipt.errorCode = error instanceof TransferError ? error.code : "TRANSFER_FAILED";
