@@ -1,6 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { Miniflare } from "miniflare";
 import { applyMigrations, loadMigrations } from "./migrations";
+import { collectReleasedD1Owners, disposeD1Runtime } from "./local-d1";
 
 export interface D1TestEnv {
   DB: D1Database;
@@ -10,7 +11,7 @@ export interface D1TestEnv {
 export type WorkerFetch = (request: Request, env: D1TestEnv) => Response | Promise<Response>;
 
 export async function createD1TestHarness(workerFetch: WorkerFetch) {
-  Bun.gc(true);
+  collectReleasedD1Owners();
   const runtime = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response(null, { status: 404 }); } }",
@@ -26,7 +27,7 @@ export async function createD1TestHarness(workerFetch: WorkerFetch) {
     const env: D1TestEnv = { DB, STEAM_VALUE_DB_TOKEN: `synthetic-${crypto.randomUUID()}` };
     return createHarness(runtime, env.STEAM_VALUE_DB_TOKEN, (request) => workerFetch(request, env));
   } catch (error) {
-    await runtime.dispose();
+    await disposeD1Runtime(runtime);
     throw error;
   }
 }
@@ -46,7 +47,7 @@ async function bundledWorker() {
 }
 
 export async function createD1WorkerTestHarness(options: D1WorkerTestOptions = {}) {
-  Bun.gc(true);
+  collectReleasedD1Owners();
   const script = await (workerBundle ??= bundledWorker());
   const token = `synthetic-${crypto.randomUUID()}`;
   const runtime = new Miniflare({
@@ -94,7 +95,7 @@ export async function createD1WorkerTestHarness(options: D1WorkerTestOptions = {
       return new Response(body, { status: response.status, headers: responseHeaders });
     });
   } catch (error) {
-    await runtime.dispose();
+    await disposeD1Runtime(runtime);
     throw error;
   }
 }
@@ -120,8 +121,7 @@ function createHarness(runtime: Miniflare, token: string, send: (request: Reques
     async dispose() {
       if (disposed) return;
       disposed = true;
-      await runtime.dispose();
-      Bun.gc(true);
+      await disposeD1Runtime(runtime);
     },
   };
 }

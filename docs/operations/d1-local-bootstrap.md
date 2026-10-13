@@ -50,6 +50,14 @@ Receipts store ID, SQL checksum, application schema JSON and second-based applic
 
 The checked-in bootstrap uses simple SQLite statements. Quoted semicolons and escaped quote delimiters are supported; compound trigger bodies are not a promised parser surface. Any live triggers require explicit inventory and reviewed migration/parser support, never silent omission.
 
+## Shared local native operator owner
+
+`src/db/local-d1.ts` exports `createLocalD1({ persistTo?, databaseNames? })`. Its owned handle returns the actual native `binding` for `DB`, `getBinding(name)` for explicitly declared additional fixture slots, and idempotent `dispose()`. Storage is ephemeral by default or explicitly `<persist-to>/v3/d1`, preserving the migration CLI/Wrangler-local `DB` identity. Construction performs **no application bootstrap**, adds no application tables and discovers no credentials or production selector. Explicit operator code must call `applyMigrations` separately; always await disposal.
+
+The migration CLI, transfer reviewed-schema reference, local transfer persistence and isolated transfer source/target pool use this owner. `collectReleasedD1Owners` and `disposeD1Runtime` centralize the [accepted native ownership boundaries](d1-catalog-test-repair.md) also reused by both Worker fixtures: collect before native allocation and after awaited disposal, including failed setup. They preserve the original fixture interfaces/default bootstrap; no private lifecycle implementation, SDK clone, retry, sleep or timeout increase is needed. The mitigation is local and Bun-specific, not a production initializer or upstream vendor fix.
+
+Operator regression evidence includes no implicit schema, explicit migration, isolated bindings and released-scope disposal followed by ten asynchronous operator process exits. With only collection withheld, the new regression times out at its existing 5,000 ms limit; restoring it passes. [Transfer evidence](d1-transfer-recovery.md#local-commands-and-rehearsal) additionally proves populated persistence/reapplication interoperability, deleted high-water preservation and source/target separation. Native schema/PRAGMA/batch privileges stay outside `/api/internal/db`; ordinary business tests continue through the Worker/client below.
+
 ## Reusable Worker/D1 fixtures
 
 `src/db/testing.ts` exposes two fixtures with the same `fetch`/`clientConfig`/`dispose` shape:

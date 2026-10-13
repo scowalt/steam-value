@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { Miniflare } from "miniflare";
-import { join, resolve } from "node:path";
+import { createLocalD1 } from "../src/db/local-d1";
+import { resolve } from "node:path";
 import { applyMigrations, loadMigrations, MigrationError } from "../src/db/migrations";
 
 const usage = "Usage: bun scripts/db-migrate.ts --local --persist-to <isolated-directory>";
@@ -15,17 +15,9 @@ async function main(args: string[]) {
     throw new Error(usage);
   }
   const persistTo = resolve(args[persistIndex + 1]!);
-  const runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response(null, { status: 404 }); } }",
-    d1Databases: ["DB"],
-    d1Persist: join(persistTo, "v3", "d1"),
-    cf: false,
-    host: "127.0.0.1",
-    port: 0,
-  });
+  const runtime = await createLocalD1({ persistTo });
   try {
-    const report = await applyMigrations(await runtime.getD1Database("DB"), await loadMigrations());
+    const report = await applyMigrations(runtime.binding, await loadMigrations());
     console.log(JSON.stringify({ scope: "isolated-local", schemaStatus: "provisional-source-schema", ...report }));
   } finally {
     await runtime.dispose();

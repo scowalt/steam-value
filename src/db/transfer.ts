@@ -1,6 +1,6 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import type { Client as LibsqlClient } from "@libsql/client";
-import { Miniflare } from "miniflare";
+import { createLocalD1 } from "./local-d1";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, rename, realpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
@@ -167,9 +167,9 @@ async function describeTables(source: TransferSource, objects: SchemaObject[]): 
 let reviewed: Promise<{ schema: ReviewedSchema; excluded: SchemaObject[]; history: { id: string; checksum: string }[]; ledger: Record<string, unknown>[] }> | undefined;
 async function reviewedSchema() {
   return reviewed ??= (async () => {
-    const runtime = new Miniflare({ modules: true, script: "export default {fetch(){return new Response(null)}}", d1Databases: ["DB"], d1Persist: false, cf: false, host: "127.0.0.1", port: 0 });
+    const runtime = await createLocalD1();
     try {
-      const binding = await runtime.getD1Database("DB");
+      const binding = runtime.binding;
       const migrations = await loadMigrations();
       await applyMigrations(binding, migrations);
       const source = createD1TransferSource(binding, { id: "reviewed-local-schema", freezeRecord: undefined! });
@@ -713,13 +713,10 @@ export async function readFreezeRecord(path: string): Promise<FreezeRecord> {
 
 export async function openLocalTransferHandle(persistTo: string) {
   const directory = await privateDirectory(persistTo);
-  const runtime = new Miniflare({
-    modules: true, script: "export default {fetch(){return new Response(null)}}", d1Databases: ["DB"],
-    d1Persist: join(directory, "v3", "d1"), cf: false, host: "127.0.0.1", port: 0,
-  });
   try {
-    return { binding: await runtime.getD1Database("DB"), dispose: () => runtime.dispose() };
-  } catch { await runtime.dispose(); throw new TransferError("TRANSFER_FAILED"); }
+    const owner = await createLocalD1({ persistTo: directory });
+    return { binding: owner.binding, dispose: owner.dispose };
+  } catch { throw new TransferError("TRANSFER_FAILED"); }
 }
 
 export async function localBehaviorVerifier(binding: D1Database, modulePath: string): Promise<NonNullable<TransferTarget["verifyBehavior"]>> {

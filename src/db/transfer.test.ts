@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { Miniflare } from "miniflare";
+import { createLocalD1, type LocalD1Owner } from "./local-d1";
 import type { Client as LibsqlClient, InArgs, InStatement } from "@libsql/client";
 import { isDbValue, type DbValue } from "./access";
 import { chmod, link, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -12,16 +12,12 @@ import { createDrizzleDb } from "./drizzle";
 import type { TransferTarget } from "./transfer";
 import { createD1TransferSource, createD1TransferTarget, createLegacyTransferSource, exportSnapshot, importSnapshot, inventorySource, prepareRollback, validateSnapshot } from "./transfer";
 
-let runtime: Miniflare;
+let runtime: LocalD1Owner;
 let nextDatabase = 0;
 const directories: string[] = [];
 
-beforeAll(() => {
-  runtime = new Miniflare({
-    modules: true, script: "export default {fetch(){return new Response(null)}}",
-    d1Databases: Array.from({ length: 100 }, (_, index) => `TRANSFER_${index}`),
-    d1Persist: false, cf: false, host: "127.0.0.1", port: 0,
-  });
+beforeAll(async () => {
+  runtime = await createLocalD1({ databaseNames: Array.from({ length: 100 }, (_, index) => `TRANSFER_${index}`) });
 });
 
 afterAll(async () => {
@@ -30,7 +26,7 @@ afterAll(async () => {
 });
 
 async function isolatedD1() {
-  const binding = await runtime.getD1Database(`TRANSFER_${nextDatabase++}`);
+  const binding = await runtime.getBinding(`TRANSFER_${nextDatabase++}`);
   await applyMigrations(binding, await loadMigrations());
   return binding;
 }
@@ -180,6 +176,13 @@ test("full validation requires representative native Worker/client behavior and 
         id: "native-target", intent: "staging", freezeRecord: freeze("native-target"), receiptPath,
         verifyBehavior: async () => {
           const client = createHttpClient(harness.clientConfig);
+          const viewer = await harness.fetch("https://d1-test.invalid/api/games");
+          expect(viewer.status).toBe(200);
+          const viewerRows: unknown = await viewer.json();
+          expect(viewerRows).toEqual([expect.objectContaining({
+            id: 7, steamAppId: 42, name: "Synthetic ü; game", hltbMain: 12.5, isOwned: true,
+            createdAt: 1700000000, tags: '["City Builder", "é"]',
+          })]);
           const db = createDrizzleDb(client);
           expect(await db.query.games.findFirst({ columns: { id: true, steamAppId: true, name: true, hltbMain: true, isOwned: true, isEarlyAccess: true, createdAt: true, tags: true } })).toEqual({
             id: 7, steamAppId: 42, name: "Synthetic ü; game", hltbMain: 12.5, isOwned: true, isEarlyAccess: null,
