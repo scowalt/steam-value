@@ -1,6 +1,7 @@
 import { DB_LIMITS, DbError, byteLength, encodeDbRequest, toDbError, validateBatch, type DbClient, type DbValue } from "../db/access.ts";
 import { DEAL_COUNTRY } from "./deal-types.ts";
 import type { DealOffer } from "./deal-types.ts";
+import { ItadError } from "./itad-errors.ts";
 
 export interface DealSource {
   lookup(appIds: number[]): Promise<Map<number, string | null>>;
@@ -16,7 +17,8 @@ const LEASE_SECONDS = 15 * 60;
 const MAPPING_MAX_AGE = 7 * 24 * 60 * 60;
 const BATCH_SIZE = 200;
 type WriteStatement = { sql: string; args: DbValue[] };
-interface WriteGroup { statements: WriteStatement[]; requireOne: boolean[] }
+interface WriteEntry { statement: WriteStatement; requireOne: boolean }
+type WriteGroup = WriteEntry[];
 export class OfferRefreshError extends Error {}
 
 export async function refreshGameDeals(client: DbClient, source: DealSource, options: RefreshOptions = {}) {
@@ -68,20 +70,20 @@ export async function refreshGameDeals(client: DbClient, source: DealSource, opt
         else {
           const g = guard();
           const id = mappings.get(appId)!;
-          const statements: WriteStatement[] = [];
-          const requireOne: boolean[] = [];
+          const entries: WriteGroup = [];
           if (id !== row.itad_id) {
-            statements.push({ sql: `DELETE FROM game_deal_cache WHERE steam_app_id=? AND ${g.sql}`, args: [appId, ...g.args] });
-            requireOne.push(false);
+            entries.push({ statement: { sql: `DELETE FROM game_deal_cache WHERE steam_app_id=? AND ${g.sql}`, args: [appId, ...g.args] }, requireOne: false });
           }
-          statements.push({
-            sql: `INSERT INTO itad_game_map (steam_app_id, itad_id, checked_at)
+          entries.push({
+            statement: {
+              sql: `INSERT INTO itad_game_map (steam_app_id, itad_id, checked_at)
               SELECT ?, ?, ? WHERE ${g.sql}
               ON CONFLICT(steam_app_id) DO UPDATE SET itad_id=excluded.itad_id, checked_at=excluded.checked_at`,
-            args: [appId, id, now(), ...g.args],
+              args: [appId, id, now(), ...g.args],
+            },
+            requireOne: true,
           });
-          requireOne.push(true);
-          mappingWrites.push({ statements, requireOne });
+          mappingWrites.push(entries);
         }
       }
       await writeGroups(client, mappingWrites, "Offer refresh lost mapping lease");
@@ -104,11 +106,11 @@ export async function refreshGameDeals(client: DbClient, source: DealSource, opt
         const id = mappings.get(appId)!;
         if (id === null) { unmapped++; continue; }
         const offers = prices.get(id);
-        const statements: WriteStatement[] = [];
+        const entries: WriteGroup = [];
         if (offers === undefined) missingPrices++;
-        else statements.push(save(appId, "retail", priceFetchedAt, offers));
-        statements.push(save(appId, "bundle", bundles.fetchedAt, bundles.games.get(id) ?? []));
-        writes.push({ statements, requireOne: statements.map(() => true) });
+        else entries.push({ statement: save(appId, "retail", priceFetchedAt, offers), requireOne: true });
+        entries.push({ statement: save(appId, "bundle", bundles.fetchedAt, bundles.games.get(id) ?? []), requireOne: true });
+        writes.push(entries);
       }
       await writeGroups(client, writes, "Offer refresh lost publication lease");
       checked += batch.length;
@@ -158,45 +160,35 @@ async function loadRankedGames(client: DbClient, limit: number): Promise<Record<
   return rows;
 }
 
-const safeProviderErrors = new Set([
-  "ITAD unavailable", "Missing ITAD_API_KEY", "Incomplete or invalid ITAD Steam mapping response",
-  "Unexpected ITAD price game ID", "ITAD bundle pagination repeated an ID; retry later",
-  "ITAD bundle pagination exceeded safety limit", "ITAD network request failed", "ITAD returned invalid JSON",
-  "ITAD requested a long retry delay; next scheduled run will retry", "Invalid ITAD discount",
-  "Invalid ITAD bundle tier", "Missing ITAD bundle publication date", "Invalid ITAD bundle game ID",
-  "Invalid ITAD object", "Invalid ITAD array", "Invalid ITAD text", "Invalid ITAD number",
-  "Invalid ITAD expiry", "Invalid ITAD offer URL",
-]);
 async function providerRequest<T>(request: () => Promise<T>): Promise<T> {
   try { return await request(); }
   catch (error) {
-    const message = error instanceof Error && (safeProviderErrors.has(error.message) || /^ITAD request failed \(HTTP [1-5]\d{2}\)$/.test(error.message))
-      ? error.message : "Offer provider request failed";
-    throw new OfferRefreshError(message);
+    throw new OfferRefreshError(ItadError.safeMessage(error) ?? "Offer provider request failed");
   }
 }
 
 async function writeGroups(client: DbClient, groups: WriteGroup[], leaseError: string): Promise<void> {
   const baseBytes = byteLength(encodeDbRequest({ version: 1, op: "batch", mode: "write", statements: [] }));
   const batches: WriteGroup[] = [];
-  let batch: WriteGroup = { statements: [], requireOne: [] };
+  let batch: WriteGroup = [];
   let bytes = baseBytes;
   for (const group of groups) {
-    const statements = validateBatch(group.statements).map(({ sql, args }) => ({ sql, args }));
-    const groupBytes = byteLength(encodeDbRequest({ version: 1, op: "batch", mode: "write", statements })) - baseBytes;
-    const separator = batch.statements.length ? 1 : 0;
-    if (batch.statements.length + statements.length > DB_LIMITS.maxStatements || bytes + separator + groupBytes > DB_LIMITS.maxRequestBytes) {
+    const entries = validateBatch(group.map(({ statement }) => statement)).map(({ sql, args }, index) => ({
+      statement: { sql, args }, requireOne: group[index]!.requireOne,
+    }));
+    const groupBytes = byteLength(encodeDbRequest({ version: 1, op: "batch", mode: "write", statements: entries.map(({ statement }) => statement) })) - baseBytes;
+    const separator = batch.length ? 1 : 0;
+    if (batch.length + entries.length > DB_LIMITS.maxStatements || bytes + separator + groupBytes > DB_LIMITS.maxRequestBytes) {
       batches.push(batch);
-      batch = { statements: [], requireOne: [] };
+      batch = [];
       bytes = baseBytes;
     }
-    bytes += groupBytes + (batch.statements.length ? 1 : 0);
-    batch.statements.push(...statements);
-    batch.requireOne.push(...group.requireOne);
+    bytes += groupBytes + (batch.length ? 1 : 0);
+    batch.push(...entries);
   }
-  if (batch.statements.length) batches.push(batch);
+  if (batch.length) batches.push(batch);
   for (const group of batches) {
-    const results = await client.batch(group.statements, "write");
-    if (results.some((result, index) => group.requireOne[index] && result.rowsAffected !== 1)) throw new OfferRefreshError(leaseError);
+    const results = await client.batch(group.map(({ statement }) => statement), "write");
+    if (results.some((result, index) => group[index]!.requireOne && result.rowsAffected !== 1)) throw new OfferRefreshError(leaseError);
   }
 }

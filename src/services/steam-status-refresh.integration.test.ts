@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { isRecord, validateWireRequest, type DbClient } from "../db/access";
 import { createHttpClient } from "../db/http";
 import { createD1WorkerTestHarness, type D1WorkerTestHarness } from "../db/testing";
+import { createSubprocessBridge } from "../db/subprocess-testing";
 import { getSyncState, syncSteamStatus, syncSteamStatusFromUserData, type SteamUserData } from "./steam-status-sync";
 
 const start = 1_800_000_000;
@@ -203,49 +204,22 @@ test("the intentional native Node 24 refresh path loads Playwright and publishes
     finally { input.close(); }
   `;
   const child = Bun.spawn([node, "--input-type=module", "-e", code], { env: {}, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-  const reader = child.stdout.getReader();
-  const decoder = new TextDecoder();
-  let pending = "";
-  async function line(): Promise<unknown> {
-    while (!pending.includes("\n")) {
-      const next = await reader.read();
-      if (next.done) throw new Error("Node refresh exited before completing its isolated request");
-      pending += decoder.decode(next.value, { stream: true });
-    }
-    const end = pending.indexOf("\n");
-    const value: unknown = JSON.parse(pending.slice(0, end));
-    pending = pending.slice(end + 1);
-    return value;
-  }
+  const bridge = createSubprocessBridge(child, (request) => harness.fetch(request));
   try {
     for (;;) {
-      const message = await line();
+      const message = await bridge.read();
       if (!isRecord(message)) throw new Error("Invalid Node refresh request bridge");
       if (message.kind === "result") {
         expect(message).toEqual({ kind: "result", steamSuccess: true, offers: { skipped: false, gamesChecked: 1, missingPrices: 0, unmapped: 0 } });
         break;
       }
-      if (message.kind !== "request" || typeof message.url !== "string" || typeof message.method !== "string" || typeof message.body !== "string" || !isRecord(message.headers)) throw new Error("Invalid Node refresh request bridge");
-      const headers = new Headers();
-      for (const [key, value] of Object.entries(message.headers)) {
-        if (typeof value !== "string") throw new Error("Invalid Node refresh header");
-        headers.set(key, value);
-      }
-      const response = await harness.fetch(new Request(message.url, { method: message.method, headers, body: message.body }));
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((header, key) => { responseHeaders[key] = header; });
-      child.stdin.write(JSON.stringify({ status: response.status, headers: responseHeaders, body: await response.text() }) + "\n");
+      if (message.kind !== "request") throw new Error("Invalid Node refresh request bridge");
+      await bridge.forward(message);
     }
-    child.stdin.end();
+    bridge.end();
     expect(await child.exited).toBe(0);
     expect((await client.execute("SELECT is_owned, playtime_minutes FROM games WHERE steam_app_id=20")).rows).toEqual([{ is_owned: 1, playtime_minutes: 60 }]);
     expect(await getSyncState(client)).toMatchObject({ lastSuccessAt: start, gamesUpdated: 1, isRunning: false });
     expect((await client.execute("SELECT kind, offers_json FROM game_deal_cache WHERE steam_app_id=20 ORDER BY kind")).rows).toEqual([{ kind: "bundle", offers_json: "[]" }, { kind: "retail", offers_json: "[]" }]);
-  } finally {
-    if (child.exitCode === null) child.kill();
-    await child.exited;
-    await reader.cancel();
-    reader.releaseLock();
-    await new Response(child.stderr).text();
-  }
+  } finally { await bridge.dispose(); }
 });

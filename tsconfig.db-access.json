@@ -12,6 +12,7 @@
     "src/db/client.ts",
     "src/db/request.test.ts",
     "src/db/testing.test.ts",
+    "src/db/subprocess-testing*.ts",
     "scripts/cloudflare-secrets.ts"
   ]
 }
