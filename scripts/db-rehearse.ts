@@ -9,6 +9,7 @@ import { createD1WorkerTestHarness, type D1WorkerTestHarness } from "../src/db/t
 import { createD1TransferSource, createD1TransferTarget, exportSnapshot, importSnapshot, inventorySource, prepareRollback, validateSnapshot, type FreezeRecord, type Snapshot, type TransferSource, type TransferTarget } from "../src/db/transfer";
 import { syncSteamStatus, getSyncState } from "../src/services/steam-status-sync";
 import { refreshGameDeals, type DealSource } from "../src/services/deal-refresh";
+import { ItadError } from "../src/services/itad-errors";
 import { getDealRefreshStatus, getGameDeals } from "../src/services/game-deals";
 import type { DealOffer } from "../src/services/deal-types";
 import type { GameDto, CityBuilderGameDto } from "../src/worker/games";
@@ -146,7 +147,7 @@ async function runWriters(harness: D1WorkerTestHarness, now: number) {
     release.resolve();
     assert.deepEqual(await first, { skipped: false, gamesChecked: 500, missingPrices: 0, unmapped: 0 });
   } finally { release.resolve(); await first.catch(() => undefined); }
-  await assert.rejects(refreshGameDeals(client, { ...provider, prices: async () => { throw new Error("ITAD unavailable"); } }, { now: () => now + 1 }), /ITAD unavailable/);
+  await assert.rejects(refreshGameDeals(client, { ...provider, prices: async () => { throw new ItadError("UNAVAILABLE"); } }, { now: () => now + 1 }), /ITAD unavailable/);
   assert.equal((await getDealRefreshStatus(client, now + 1)).lastSuccessAt, now);
   const missing = await refreshGameDeals(client, { ...provider, prices: async (ids) => new Map(ids.filter((id) => id !== "synthetic-2").map((id) => [id, []])) }, { now: () => now + 2 });
   assert.equal(missing.missingPrices, 1);

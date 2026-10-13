@@ -1,4 +1,5 @@
 import { DEAL_MAX_AGE_SECONDS, type DealOffer } from "./deal-types";
+import { ItadError } from "./itad-errors.ts";
 
 const API = "https://api.isthereanydeal.com";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,7 +22,7 @@ export class ItadClient {
   private readonly retries: number;
 
   constructor(private readonly apiKey: string, options: ItadOptions = {}) {
-    if (!apiKey) throw new Error("Missing ITAD_API_KEY");
+    if (!apiKey) throw new ItadError("MISSING_API_KEY");
     this.fetcher = options.fetch ?? fetch;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.now = options.now ?? (() => Math.floor(Date.now() / 1000));
@@ -35,7 +36,7 @@ export class ItadClient {
     for (const id of appIds) {
       const value = data[`app/${id}`];
       if (value !== null && (typeof value !== "string" || !UUID.test(value))) {
-        throw new Error("Incomplete or invalid ITAD Steam mapping response");
+        throw new ItadError("INVALID_MAPPING");
       }
       result.set(id, value);
     }
@@ -50,7 +51,7 @@ export class ItadClient {
     for (const value of data) {
       const row = object(value);
       const id = text(row.id);
-      if (!requested.has(id) || result.has(id)) throw new Error("Unexpected ITAD price game ID");
+      if (!requested.has(id) || result.has(id)) throw new ItadError("UNEXPECTED_PRICE_ID");
       const offers = array(row.deals).flatMap((deal) => {
         const offer = retailOffer(object(deal), fetchedAt);
         return offer ? [offer] : [];
@@ -69,7 +70,7 @@ export class ItadClient {
       for (const value of page) {
         const bundle = object(value);
         const id = integer(bundle.id);
-        if (seen.has(id)) throw new Error("ITAD bundle pagination repeated an ID; retry later");
+        if (seen.has(id)) throw new ItadError("REPEATED_BUNDLE_ID");
         seen.add(id);
         for (const [gameId, offer] of bundleOffers(bundle, fetchedAt)) {
           const offers = games.get(gameId) ?? [];
@@ -79,7 +80,7 @@ export class ItadClient {
       }
       if (page.length < 50) return { fetchedAt, games };
     }
-    throw new Error("ITAD bundle pagination exceeded safety limit");
+    throw new ItadError("BUNDLE_PAGE_LIMIT");
   }
 
   private async request(path: string, body?: unknown): Promise<unknown> {
@@ -95,25 +96,25 @@ export class ItadClient {
           redirect: "error",
         });
       } catch {
-        if (attempt >= this.retries) throw new Error("ITAD network request failed");
+        if (attempt >= this.retries) throw new ItadError("NETWORK_FAILURE");
         await this.sleep(1000 * 2 ** attempt);
         continue;
       }
       if (response.ok) {
         try { return await response.json(); }
-        catch { throw new Error("ITAD returned invalid JSON"); }
+        catch { throw new ItadError("INVALID_JSON"); }
       }
       const retryable = response.status === 429 || response.status >= 500;
       const retryAfter = response.headers.get("Retry-After");
       await response.body?.cancel();
-      if (!retryable || attempt >= this.retries) throw new Error(`ITAD request failed (HTTP ${response.status})`);
+      if (!retryable || attempt >= this.retries) throw new ItadError("HTTP_FAILURE", response.status);
       let wait = 1000 * 2 ** attempt;
       if (retryAfter) {
         const seconds = Number(retryAfter);
         const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - this.now() * 1000;
         if (Number.isFinite(delay)) wait = Math.max(wait, delay);
       }
-      if (wait > 120_000) throw new Error("ITAD requested a long retry delay; next scheduled run will retry");
+      if (wait > 120_000) throw new ItadError("LONG_RETRY_DELAY");
       await this.sleep(wait);
     }
   }
@@ -124,7 +125,7 @@ function retailOffer(deal: JsonObject, fetchedAt: number): DealOffer | null {
   const regular = money(deal.regular);
   const cut = integer(deal.cut);
   const expiresAt = expiry(deal.expiry);
-  if (cut > 100) throw new Error("Invalid ITAD discount");
+  if (cut > 100) throw new ItadError("INVALID_DISCOUNT");
   if (price === null || regular === null || cut === 0 || price >= regular || (expiresAt !== null && expiresAt <= fetchedAt)) return null;
   const shop = object(deal.shop);
   const store = text(shop.name);
@@ -142,7 +143,7 @@ function bundleOffers(bundle: JsonObject, fetchedAt: number): [string, DealOffer
   const title = text(bundle.title);
   const expiresAt = expiry(bundle.expiry);
   const publishAt = expiry(bundle.publish);
-  if (publishAt === null) throw new Error("Missing ITAD bundle publication date");
+  if (publishAt === null) throw new ItadError("MISSING_BUNDLE_PUBLICATION");
   if (publishAt > fetchedAt || (expiresAt !== null && expiresAt <= fetchedAt)) return [];
   const store = text(object(bundle.page).name);
   const url = link(bundle.url);
@@ -150,7 +151,7 @@ function bundleOffers(bundle: JsonObject, fetchedAt: number): [string, DealOffer
   const result: [string, DealOffer][] = [];
   for (const [index, value] of array(bundle.tiers).entries()) {
     const tier = object(value);
-    if (typeof tier.addon !== "boolean") throw new Error("Invalid ITAD bundle tier");
+    if (typeof tier.addon !== "boolean") throw new ItadError("INVALID_BUNDLE_TIER");
     const price = tier.price === null ? null : money(tier.price);
     if (tier.price !== null && price === null) continue;
     const ambiguous = tier.addon || /build your own|pick.?and.?mix|choose/i.test(`${title} ${note ?? ""}`);
@@ -163,7 +164,7 @@ function bundleOffers(bundle: JsonObject, fetchedAt: number): [string, DealOffer
     };
     for (const game of array(tier.games)) {
       const gameId = text(object(game).id);
-      if (!UUID.test(gameId)) throw new Error("Invalid ITAD bundle game ID");
+      if (!UUID.test(gameId)) throw new ItadError("INVALID_BUNDLE_GAME_ID");
       result.push([gameId, offer]);
     }
   }
@@ -171,15 +172,15 @@ function bundleOffers(bundle: JsonObject, fetchedAt: number): [string, DealOffer
 }
 
 function object(value: unknown): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid ITAD object");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ItadError("INVALID_OBJECT");
   return value as JsonObject;
 }
 function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new Error("Invalid ITAD array");
+  if (!Array.isArray(value)) throw new ItadError("INVALID_ARRAY");
   return value;
 }
 function text(value: unknown): string {
-  if (typeof value !== "string" || value.trim() === "") throw new Error("Invalid ITAD text");
+  if (typeof value !== "string" || value.trim() === "") throw new ItadError("INVALID_TEXT");
   return value;
 }
 function nullableText(value: unknown): string | null {
@@ -187,7 +188,7 @@ function nullableText(value: unknown): string | null {
   return text(value);
 }
 function integer(value: unknown): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error("Invalid ITAD number");
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new ItadError("INVALID_NUMBER");
   return value;
 }
 function money(value: unknown): number | null {
@@ -198,12 +199,12 @@ function money(value: unknown): number | null {
 function expiry(value: unknown): number | null {
   if (value === null) return null;
   const parsed = Date.parse(text(value));
-  if (!Number.isFinite(parsed)) throw new Error("Invalid ITAD expiry");
+  if (!Number.isFinite(parsed)) throw new ItadError("INVALID_EXPIRY");
   return Math.floor(parsed / 1000);
 }
 function link(value: unknown): string {
   const original = text(value);
   const url = new URL(original);
-  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new Error("Invalid ITAD offer URL");
+  if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) throw new ItadError("INVALID_URL");
   return original;
 }

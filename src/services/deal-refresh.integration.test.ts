@@ -3,6 +3,8 @@ import { validateWireRequest, type DbClient } from "../db/access";
 import { createHttpClient } from "../db/http";
 import { createD1WorkerTestHarness, type D1WorkerTestHarness } from "../db/testing";
 import { refreshGameDeals, type DealSource } from "./deal-refresh";
+import { ItadError } from "./itad-errors";
+import { ItadClient } from "./itad-client";
 import { getDealRefreshStatus, getGameDeals } from "./game-deals";
 import type { DealOffer } from "./deal-types";
 
@@ -164,7 +166,7 @@ test("offer freshness expires at exactly 24 hours and honors earlier provider ex
 test("missing retail does not renew verified data, provider failure preserves it, and successful empty scopes remove sales", async () => {
   await run();
   now = start + 3600;
-  await expect(run(source({ prices: async () => { throw new Error("ITAD unavailable"); } }))).rejects.toThrow("ITAD unavailable");
+  await expect(run(source({ prices: async () => { throw new ItadError("UNAVAILABLE"); } }))).rejects.toThrow("ITAD unavailable");
   expect((await getGameDeals(client, [2], now)).get(2)).toEqual({ status: "fresh", checkedAt: start, offers: [offer("retail")] });
   expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start, lastError: "ITAD unavailable", isRunning: false });
   now = start + 86400;
@@ -244,6 +246,29 @@ test("unsupported single-scope bytes reject the complete publication group rathe
 
 test("unsafe provider exceptions never escape or enter persisted offer failure state", async () => {
   await expect(run(source({ bundles: async () => { throw new Error("private-token / SQL parameters / raw upstream body"); } }))).rejects.toThrow("Offer provider request failed");
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastError: "Offer provider request failed", lastSuccessAt: null, isRunning: false, freshGames: 0 });
+});
+
+test.each([
+  { name: "object validation", response: () => Response.json([]), message: "Invalid ITAD object" },
+  { name: "invalid JSON", response: () => new Response("synthetic-untrusted-body"), message: "ITAD returned invalid JSON" },
+  { name: "HTTP rejection", response: () => new Response("synthetic-untrusted-body", { status: 401 }), message: "ITAD request failed (HTTP 401)" },
+])("real provider diagnostics remain useful and safe through native refresh persistence: $name", async ({ response, message }) => {
+  const provider = new ItadClient("synthetic-provider-key", { fetch: async () => response(), sleep: async () => {}, retries: 0, now: () => now });
+  await expect(run(source({ lookup: (ids) => provider.lookup(ids) }))).rejects.toThrow(message);
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastError: message, lastSuccessAt: null, isRunning: false, freshGames: 0 });
+});
+
+test("a trusted provider error keeps its safe diagnostic even if its public message is overwritten", async () => {
+  const error = new ItadError("INVALID_OBJECT");
+  error.message = "synthetic-private-key / raw provider body / SQL parameters";
+  await expect(run(source({ prices: async () => { throw error; } }))).rejects.toThrow("Invalid ITAD object");
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastError: "Invalid ITAD object", lastSuccessAt: null, isRunning: false, freshGames: 0 });
+});
+
+test.each(["ITAD unavailable", "Invalid ITAD object", "ITAD request failed (HTTP 401)"])("untrusted exceptions cannot spoof safe provider diagnostics by message: %s", async (message) => {
+  const error = Object.assign(new Error(message), { name: "ItadError", code: "UNAVAILABLE" });
+  await expect(run(source({ prices: async () => { throw error; } }))).rejects.toThrow("Offer provider request failed");
   expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastError: "Offer provider request failed", lastSuccessAt: null, isRunning: false, freshGames: 0 });
 });
 

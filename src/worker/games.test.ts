@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { getDealRefreshStatus, getGameDeals } from "../services/game-deals";
 import { refreshGameDeals, type DealSource } from "../services/deal-refresh";
+import { ItadError } from "../services/itad-errors";
 import type { DealOffer } from "../services/deal-types";
 import { listGames, parseGameQuery, type CityBuilderGameDto, type GameDto } from "./games";
 import { createHttpClient } from "../db/http";
@@ -78,7 +79,7 @@ describe("rankings with ITAD offers", () => {
     const result = await run(source({ prices: async () => new Map() }));
     expect(result.missingPrices).toBe(4);
     expect((await getGameDeals(client, [2], now)).get(2)).toMatchObject({ status: "partial", offers: [] });
-    const failure = source({ bundles: async () => { throw new Error("ITAD unavailable"); } });
+    const failure = source({ bundles: async () => { throw new ItadError("UNAVAILABLE"); } });
     now += 10;
     await expect(run(failure)).rejects.toThrow("ITAD unavailable");
     expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastError: "ITAD unavailable", isRunning: false, lastSuccessAt: start + 86400 });
@@ -115,7 +116,7 @@ describe("rankings with ITAD offers", () => {
   test("a failed retail request keeps previously verified offers within their original lifetime", async () => {
     await run();
     now += 3600;
-    await expect(run(source({ prices: async () => { throw new Error("ITAD unavailable"); } }))).rejects.toThrow("ITAD unavailable");
+    await expect(run(source({ prices: async () => { throw new ItadError("UNAVAILABLE"); } }))).rejects.toThrow("ITAD unavailable");
     expect((await getGameDeals(client, [2], now)).get(2)).toMatchObject({ checkedAt: start, status: "fresh" });
     expect((await listGames(client, query("onSale=true"), now)).map((g) => g.id)).toEqual([2, 3]);
     expect(await listGames(client, query("onSale=true"), start + 86400)).toEqual([]);

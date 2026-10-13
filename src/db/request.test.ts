@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { games } from "./schema";
 import { isRecord, toDbError } from "./access";
 import { createD1TestHarness, createD1WorkerTestHarness, type D1WorkerTestHarness } from "./testing";
+import { createSubprocessBridge } from "./subprocess-testing";
 
 function external(fetch = dispatch) {
   return createHttpClient({ url: endpoint, token, accessClientId: "synthetic-client-id", accessClientSecret: "synthetic-client-secret", fetch });
@@ -100,34 +101,13 @@ test("the external raw client runs on native Node TypeScript through the same re
     finally { input.close(); }
   `;
   const child = Bun.spawn([node, "--input-type=module", "-e", code], { env: {}, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-  const reader = child.stdout.getReader();
-  const decoder = new TextDecoder();
-  let pending = "";
-  async function line(): Promise<unknown> {
-    while (!pending.includes("\n")) {
-      const next = await reader.read();
-      if (next.done) throw new Error("Node client exited before completing the isolated request");
-      pending += decoder.decode(next.value, { stream: true });
-    }
-    const end = pending.indexOf("\n");
-    const value: unknown = JSON.parse(pending.slice(0, end));
-    pending = pending.slice(end + 1);
-    return value;
-  }
+  const bridge = createSubprocessBridge(child, dispatch);
   try {
-    const message = await line();
-    if (!isRecord(message) || typeof message.url !== "string" || typeof message.method !== "string" || typeof message.body !== "string" || !isRecord(message.headers)) throw new Error("Invalid Node request bridge");
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(message.headers)) {
-      if (typeof value !== "string") throw new Error("Invalid Node request header");
-      headers.set(key, value);
-    }
-    const response = await dispatch(new Request(message.url, { method: message.method, headers, body: message.body }));
-    child.stdin.write(JSON.stringify({ status: response.status, headers: Object.fromEntries(response.headers), body: await response.text() }) + "\n");
-    child.stdin.end();
-    expect(await line()).toEqual({ columns: ["z_text", "a_number", "nullable"], rows: [{ z_text: "Node JSON text", a_number: 24, nullable: null }], rowsAffected: 0 });
+    await bridge.forward(await bridge.read());
+    bridge.end();
+    expect(await bridge.read()).toEqual({ columns: ["z_text", "a_number", "nullable"], rows: [{ z_text: "Node JSON text", a_number: 24, nullable: null }], rowsAffected: 0 });
     expect(await child.exited).toBe(0);
-  } finally { reader.releaseLock(); if (child.exitCode === null) child.kill(); await child.exited; }
+  } finally { await bridge.dispose(); }
 });
 
 test("external atomic batches retain input order and roll back every write on a constraint failure", async () => {
