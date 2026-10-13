@@ -21,6 +21,28 @@ The dedicated image in `steel-browser/Dockerfile` extends arcane's known-good Ch
 
 During authorized browser operations, run `node scripts/sync-steam-status-browser.ts --login` with the Steel environment loaded. Open the printed `STEEL_LOGIN_URL` from a tailnet-connected browser, complete Steam Guard, and wait for nonzero authenticated counts. This branch never constructs a database client and needs no database credentials. The script intentionally uses Node 24 because Bun 1.3.11 hangs while Playwright attaches to the self-hosted CDP endpoint. Preserve the pinned Node service runtime, Steel profile path, cookie check, persistence and tailnet-only listeners.
 
+## Approved freeze, drain and resume
+
+The complete [plan/provision/import/coherent-cutover/recovery runbook](../../docs/operations/d1-cutover.md) governs these steps. **No command below was run during preparation.** Actual installed units, manual jobs and out-of-repo writers remain UNVERIFIED; repo templates are not an installed-writer inventory. Both main merges stay held until separate provisioning/cutover approval.
+
+Before the approved window, privately record installed code/dependency revisions, unit/environment paths, timer enabled state and schedules, active jobs/children and manual-owner acknowledgements. Preserve Node 24 at the existing unit path, Bun offers runtime, both 10/45-minute service timeouts, daily/hourly persistent schedules/jitter and the Steel image/profile volume. Do not stop/recreate Steel to freeze database writers.
+
+During the approved freeze, stop **both timers**, not just one lease:
+
+```sh
+systemctl --user stop steam-value-status-sync.timer steam-value-deals-refresh.timer
+systemctl --user show steam-value-status-sync.timer steam-value-deals-refresh.timer -p ActiveState -p SubState
+systemctl --user show steam-value-status-sync.service steam-value-deals-refresh.service -p ActiveState -p SubState -p MainPID -p Result
+```
+
+Let active services finish and verify their processes/children are gone. Timer stop does not stop an already running service. A forced kill may leave partial/unknown writes: preserve/inspect and reconcile before attesting a freeze, not merely wait for lease expiry. Stop launches and drain every manual catalog/alias, enrichment, HowLongToBeat, insert/analysis, ownership/wishlist, recalculation, intentional cleanup, setup/schema and out-of-repo writer. Old installed code may still perform initialization/error/checkpoint writes on failed/skipped runs. A `FreezeRecord` records evidence; it does not pause processes.
+
+Hold the freeze while the final Turso export, complete D1 import and actual target data/behavior validation finish. Keep Turso browsing until validated; never mix old Turso writers with a D1 viewer. After explicit coordinated promotion approval, install the tested complete code/dependency tree and prepared protected environments **together**, verify owner-only directory/file modes without printing contents, reload units if needed, and confirm every scheduled/manual consumer points to the same Worker endpoint. No schema initialization is performed by these jobs. The application deployment must use the successful-current-main exact CI artifact, not a manual integration build.
+
+Resume deliberately only after hosted viewer/machine Access/data validation: run one status and one offers service, verify persisted success/counts/Playtime/offer/lease/error state, then restore each timer's recorded enabled state. Account for persistent catch-up and five-minute jitter; do not queue overlapping catch-up work before validation. A successful service exit or health response is not full migration validation. For any unknown/committed write error, freeze launches and follow [reconciliation](../../docs/operations/d1-refresh-jobs.md#uncertain-writes), never blindly rerun or clear a lease.
+
+Rollback freezes/drains **again**, preserves the complete post-cutover D1 snapshot and reconciles new changes before coordinated code/environment reversion. Retain read-only Turso and validated exports ≥7 days; deletion/legacy credential retirement needs explicit owner approval. No preparer deploys/operates arcane or closes #17/#28/#29.
+
 ## Operations (separately authorized, not preparation commands)
 
 Explicitly bootstrap/validate D1 before installing the prepared consumers. Refresh services and ordinary deployments do not create tables. Keep both timers paused and active services drained throughout the final export/import/validation and coherent code/configuration switch; lease expiry is not a writer freeze.

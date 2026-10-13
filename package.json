@@ -19,6 +19,7 @@
     "secrets:sync": "bun scripts/cloudflare-secrets.ts sync",
     "db:migrate:local": "bun scripts/db-migrate.ts --local",
     "db:transfer": "bun --no-env-file scripts/db-transfer.ts",
+    "db:rehearse": "bun --no-env-file scripts/db-rehearse.ts",
     "db:generate": "bun scripts/db-generate.ts",
     "db:push": "bun scripts/db-migrate.ts",
     "db:studio": "bun scripts/db-inspect.ts",

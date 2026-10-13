@@ -1,27 +1,8 @@
-import type { Client } from "@libsql/client/web";
 import { DB_LIMITS, type DbClient, type DbStatement, type DbValue } from "../db/access";
 import { DEAL_COUNTRY, DEAL_MAX_AGE_SECONDS, type DealOffer, type DealRefreshStatus, type GameDeals } from "./deal-types";
 
 export { DEAL_COUNTRY, DEAL_MAX_AGE_SECONDS } from "./deal-types";
 export type { DealOffer, DealRefreshStatus, GameDeals } from "./deal-types";
-
-export async function ensureDealTables(client: Client): Promise<void> {
-  await client.batch([
-    `CREATE TABLE IF NOT EXISTS itad_game_map (
-      steam_app_id INTEGER PRIMARY KEY, itad_id TEXT, checked_at INTEGER NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS game_deal_cache (
-      steam_app_id INTEGER NOT NULL, country TEXT NOT NULL,
-      kind TEXT NOT NULL CHECK(kind IN ('retail','bundle')),
-      checked_at INTEGER NOT NULL, offers_json TEXT NOT NULL CHECK(json_valid(offers_json)),
-      PRIMARY KEY(steam_app_id, country, kind)
-    )`,
-    `CREATE TABLE IF NOT EXISTS deal_refresh_state (
-      country TEXT PRIMARY KEY, last_attempt_at INTEGER, last_success_at INTEGER, last_error TEXT,
-      lock_token TEXT, lock_expires_at INTEGER, games_checked INTEGER NOT NULL DEFAULT 0
-    )`,
-  ], "write");
-}
 
 export const ON_SALE_SQL = `EXISTS (
   SELECT 1 FROM game_deal_cache dc, json_each(dc.offers_json) offer

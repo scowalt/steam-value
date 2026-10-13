@@ -1,214 +1,126 @@
 # Steam Value
 
-A personal game library analyzer that scores Steam games by review quality and time-to-beat. Finds the best-value games in your wishlist and library.
+A personal game library analyzer that ranks Steam games by review quality and HowLongToBeat Estimates. Recorded Playtime and Steam Status remain separate from public Catalog Facts.
 
-## How It Works
+## Migration status: preparation, not production
 
-Each game gets a **value score** based on:
+**Production remains Turso-backed. Both production-changing main merges are held.** This branch prepares D1 under the approved [#17 plan](https://github.com/scowalt/steam-value/issues/17#issuecomment-6135327372); code/tests do not authorize subscription changes, provisioning, source access, deployment, arcane operations or cutover. [#27](https://github.com/scowalt/steam-value/issues/27) still requires independent review and parent-owned cleanup/closure. [#17](https://github.com/scowalt/steam-value/issues/17), [#28](https://github.com/scowalt/steam-value/issues/28) and [#29](https://github.com/scowalt/steam-value/issues/29) cannot close on code-only evidence.
 
-- **Review quality** (Steam review %, Bayesian-adjusted for low review counts)
-- **Time to beat** (from HowLongToBeat, mild penalty for longer games)
-- **Age decay** (2% per year, capped at 50%)
+| Surface | Existing production | Prepared integration |
+| --- | --- | --- |
+| Database | Turso; installed consumers unchanged | Complete seven-table D1 schema; native Worker `DB` binding |
+| External jobs/manual tools | Existing Turso code/configuration | HTTPS `POST /api/internal/db`, Access Service Auth **and** separate bearer credential; shared raw/Drizzle clients |
+| Infrastructure | Existing domain/viewer Access | Companion mission-control protected D1 and exact-path machine Access, not applied |
+| Promotion | Ordinary tested-main Turso deployments continue | Hold application `integration/d1-migration-17` and companion `integration/steam-value-d1-17` off main until separately approved provisioning/cutover and validated frozen import |
 
-High-rated, shorter games rank higher than mediocre, long ones. The formula is configurable in `src/formula/config.ts`.
+Actual source schema/defaults/data/writers, Paid eligibility, permissions, edge Access and production behavior are **UNVERIFIED**. Local schema is provisional, including the conflicting `sync_state.updated_at` declarations. See the [final inventory](docs/operations/d1-consumer-schema-inventory.md#integrated-preparation-status-27), [rehearsal evidence](docs/operations/d1-integrated-rehearsal.md) and [approval/cutover/recovery runbook](docs/operations/d1-cutover.md).
 
-## Data Sources
+## How it works
 
-- **Steam API** — reviews, app details, ownership, wishlist, ignored list
-- **IsThereAnyDeal** — US/USD discounts across supported stores and active bundles
-- **HowLongToBeat** — completion times (manual/batch enrichment)
-- **Wikidata** — Steam ID to HLTB ID mappings
-- **SteamDB dataset** — local lookup for fast mapping
+Value Score combines Bayesian-adjusted Steam review quality, a mild HowLongToBeat time penalty, and 2% annual age decay capped at 50%. The formula/configuration in `src/formula/` is unchanged by D1.
 
-## Architecture
+Sources: Steam API (reviews/details/ownership/wishlist/ignored/Playtime), IsThereAnyDeal (US/USD retail discounts/bundles), HowLongToBeat (manual/batch estimates), Wikidata mappings and a local SteamDB dataset.
 
-The always-on web surface runs as a **Cloudflare Worker with Static Assets** at `steam-value.scowalt.com`, protected by Cloudflare Access.
+The always-on viewer is a **Cloudflare Worker with Static Assets** at `steam-value.scowalt.com`, protected by human Cloudflare Access. It serves `/api/games`, `/api/city-builders`, `/api/sync-state`, `/api/deal-state` and `/api/health`. Prepared SQL access is machine-only, never a browser SQL UI. `workers.dev` and preview URLs stay explicitly disabled; Worker cron stays empty.
 
-- **Cloudflare Worker**: serves static assets, `GET /api/games`, and `GET /api/sync-state`.
-- **Steel on arcane**: keeps a persistent, tailnet-only Steam browser profile and runs the daily Steam Status refresh.
-- **Turso**: remains the production SQLite database for both the Worker and admin scripts.
-- **Doppler**: remains the source of truth for database and Steam API secrets. Only Turso secrets are mirrored to the Worker.
-- **GitHub Actions**: tests and builds every pull request; tested `main` artifacts deploy the Worker script/assets.
-- **Mission-control OpenTofu**: owns the custom domain, disabled workers.dev/preview endpoints, empty cron schedule, and Cloudflare Access application.
+- Steam Status runs daily on **arcane**, using intentional **Node 24/Playwright** and the persistent, tailnet-only Steel profile. The Steam HttpOnly cookie stays there.
+- Catalog Facts enrichment remains occasional external/admin work; HowLongToBeat enrichment remains manual/batch. Offers run hourly on arcane with Bun. No provider requests or new refresh actions run in the Worker/browser.
+- Doppler remains the credential source; routine D1 jobs receive application credentials, not Cloudflare account credentials.
+- This application owns code/assets, binding and immutable SQL history. Mission-control owns the domain, Access and protected D1 resource; no ordinary request/deployment initializes schema.
 
-Operational boundaries:
+See [ADRs](docs/adr/0004-move-database-to-cloudflare-d1.md) and [GLOSSARY.md](GLOSSARY.md).
 
-- **Steam Status** (wishlist, ignored, ownership, playtime): refreshed daily on arcane through a persistent Steel browser plus Steam's owned-games and recently-played APIs.
-- **Catalog Facts** (tags, controller support, game modes, release dates): refreshed by occasional external/admin jobs.
-- **HowLongToBeat estimates**: manual/batch enrichment only; not run in the Worker.
+## Isolated setup and verification
 
-## Usage
+Bun is the default toolchain; preserve the scheduled Node 24 exception. No Turso account, Doppler download, provider or production credential is needed:
 
-```bash
-bun install
-
-# Add a game by Steam App ID
-bun add -- 292030        # The Witcher 3
-
-# List all games sorted by value
-bun list
-
-# Refresh Steam catalog rows and review scores/counts
-bun run catalog:refresh
-
-# Start local Worker dev (writes .dev.vars from Doppler, builds assets, runs Wrangler/Miniflare)
-bun web
-
-# Recalculate all scores (after config changes)
-bun recalc
-```
-
-## Web UI
-
-Browse and filter your game library through the Cloudflare Worker:
-
-- Sort by value score, reviews, or time-to-beat
-- Filter: hide early access, hide played, hide MMO, hide ignored
-- Filter by co-op mode (any, online, local) and controller support
-- Links directly to Steam Store pages
-- Shows last Steam Status refresh metadata
-- **On sale or in bundle** includes fresh retail discounts and active bundle opportunities from IsThereAnyDeal, combined with all existing filters before pagination
-- A dedicated **Deals** column (compact labeled field on mobile) shows the best-price retail offer's **% off**, **In bundle**, or both, linked to the original offers. A dash means no current offer can be shown, not proof that no sale exists
-- Check linked providers for price, activation/DRM, voucher and bundle choice/add-on requirements; non-Steam copies are possible. Bundle badges do not imply an individual-game price
-- Offers are usable for **24 hours after fetching**, or until an earlier known expiry. Unknown expiry is not a guarantee of checkout availability. Missing or failed responses do not extend freshness; the UI expires badges without displaying a refresh-status panel
-
-Local web development uses Wrangler/Miniflare, not the old Bun server:
-
-```bash
-bun web
-```
-
-## Tests
-
-```bash
-bunx playwright install chromium  # one-time browser setup
-bun test
-bun run typecheck
-```
-
-Tests use local in-memory SQLite and intercepted browser requests, not production APIs or credentials. Desktop/mobile checks do not start a development server.
-
-## Build and Deploy
-
-Every pull request runs tests, typechecks, and a production build in an unprivileged CI workflow. A separate default-branch `workflow_run` workflow receives production credentials only after successful CI on `main`, verifies the tested SHA is still current, and deploys that CI run's exact artifact through the `production` GitHub environment. Deployments are serialized and tagged with the commit SHA.
-
-The environment contains only:
-
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`, with Cloudflare Worker **Editor** access scoped to the existing `steam-value` Worker
-
-The token does not need DNS, Access, R2, Turso, custom-domain, or Worker-creation permission. `wrangler.toml` owns Worker code/assets and runtime settings. Mission-control OpenTofu separately owns the custom domain, Access, disabled workers.dev/preview endpoints, and cron infrastructure; see [ADR 0003](docs/adr/0003-deploy-worker-application-through-github-actions.md).
-
-For local verification only:
-
-```bash
+```sh
 bun install --frozen-lockfile
 bunx playwright install chromium
-bun test
-bun run build
-bunx wrangler deploy --dry-run --no-bundle --strict --keep-vars
+scratch=$(mktemp -d /tmp/steam-value-d1.XXXXXX)
+bun --no-env-file run db:migrate:local --persist-to "$scratch"
+bun --no-env-file run db:inspect --local --persist-to "$scratch"
+bun --no-env-file test
+bun --no-env-file run typecheck
+bun --no-env-file run build
 ```
 
-Do not deploy pull-request artifacts manually. For an emergency rollback, an operator with the same Worker-scoped credential can inspect version history and run `bunx wrangler rollback`. Then revert the offending commit on `main` so the next green deployment restores source/production agreement. Worker secrets are preserved by deploys and continue to be synced separately from Doppler when intentionally changed.
+Tests run the **actual bundled Worker/native local D1**, external raw/Drizzle clients through it, deterministic provider/time fixtures, explicit bootstrap/transfer/recovery and intercepted browser HTTP. No development server is started. Normal typecheck/build covers all seven projects: Worker, web, browser sync, database tools/access, catalog and manual consumers, including the rehearsal runner. The Bun/Miniflare released-pipe compatibility mitigation is local-only; retain its [regressions and failure history](docs/operations/d1-catalog-test-repair.md).
 
-## Database
+For a populated synthetic end-to-end rehearsal, choose a **new** protected directory outside Git:
 
-Turso (SQLite) via Drizzle ORM for admin scripts. The Worker uses raw libSQL queries to keep edge runtime behavior explicit.
-
-```bash
-bun db:push             # Push schema changes
-bun db:setup-worker     # Create Worker sync metadata table and indexes
-bun db:studio           # Open Drizzle Studio
+```sh
+umask 077
+parent=$(mktemp -d /tmp/steam-value-d1-rehearsal.XXXXXX)
+bun --no-env-file run db:rehearse --local --destination "$parent/evidence"
 ```
 
-## Scripts
+This verifies 500 games/all seven tables, native viewer 100/500 pages, typed data, deleted-ID high-water/orphans, synthetic jobs and chunked maintenance, full export/import/validation, post-cutover preservation and fresh recovery restore. Artifacts stay mode-0700 directories/mode-0600 files outside Git. Keep failed/incomplete artifacts for inspection; remove only your own disposable artifacts when appropriate. It is **not** a live-data rehearsal or rollback approval.
 
-| Script | Purpose |
-|--------|---------|
-| `bun add -- <appId>` | Add a game with HLTB verification |
-| `bun list` | List all games with scores |
-| `bun recalc` | Recalculate all value scores |
-| `bun run catalog:refresh` | Upsert Steam catalog rows and refresh review scores/counts |
-| `bun run deals:refresh` | Refresh US/USD retail discounts and bundles for ranked games via IsThereAnyDeal |
-| `bun web` | Build and run the Worker locally through Wrangler/Miniflare |
-| `bun run build` | Build static assets and Worker bundle into `dist/` |
-| `bun run secrets:dev` | Write selected Doppler secrets to `.dev.vars` for local Worker dev |
-| `bun run secrets:sync` | Upload Turso secrets to Cloudflare Worker secrets |
-| `bun run db:setup-worker` | Prepare Turso sync metadata table and Worker indexes |
-| `bun run hydrate-daily` | Manual external Steam Status refresh fallback |
-| `bun run steam:browser-login` | Open a Steel session for one-time Steam login |
-| `bun run steam:browser-sync` | Run the guarded browser-backed Steam Status refresh |
+### Optional browser development
 
-Hydration scripts in `scripts/` bulk-fetch Catalog Facts from Steam, SteamSpy, Wikidata, and HLTB. They remain external/admin jobs and write directly to Turso.
+Use the explicit local bootstrap above and only synthetic local data/configuration. Do not use `bun web`, `worker:dev` or `secrets:dev` for isolated preparation: those convenience aliases download Doppler credentials. `dev` does not mean an isolated database. Do not reuse a production `.dev.vars` or `.env`.
 
-### IsThereAnyDeal offers
+Start any browser-accessible server only through Portless with private Tailscale sharing, letting Portless choose the backend port:
 
-Offers are independent Catalog Facts, not Steam Status or a component of Value Score. An hourly job on arcane refreshes only rankable games using exact Steam app-ID mapping (cached for seven days), batches of up to 200 ITAD game IDs, and a complete active-bundle feed. It uses throttling, bounded retries honoring `Retry-After`, and a renewable database lease to prevent overlapping publication. No ITAD requests run in the Worker or browser.
-
-`game_deal_cache` stores separate retail/bundle snapshots so missing retail responses cannot silently become a fresh “no offers” result. `itad_game_map` and `deal_refresh_state` track identity and operational status. `bun run db:setup-worker` creates these tables additively; run it before deploying the updated Worker. The hourly service also ensures its own tables exist. No game-table migration is required.
-
-```bash
-bun run deals:refresh --limit 20  # bounded live verification
-bun run deals:refresh             # all currently ranked games
+```sh
+export D1_LOCAL_DIR="$scratch"
+PORTLESS_TAILSCALE=1 portless run --tailscale sh -c 'bunx wrangler dev --port "$PORT" --persist-to "$D1_LOCAL_DIR"'
 ```
 
-`GET /api/games?onSale=true` applies sale filtering before pagination; each game includes offer kind, freshness, price and conditions. `GET /api/deal-state` reports last attempt/success, errors, running state and complete fresh coverage. Successful no-offer responses replace disappeared offers; failed/missing responses retain prior data only until its original deadline. An open browser tab also expires displayed offers.
+Then run `portless list`, verify and use its actual local/private Tailscale URLs; never guess a port, use a public tunnel, manually run Tailscale serve or stop the shared proxy. If Portless/private sharing is unavailable, stop. Local viewer reads need no machine credential; any local machine testing must use a separately prepared synthetic bearer, never downloaded production credentials.
 
-Price data is provided by [IsThereAnyDeal](https://isthereanydeal.com/); original affiliate links are preserved, and voucher requirements remain in the offer API data. The UI shows only compact linked badges and footer attribution. Private personal use is explicitly allowed by the current API documentation (the linked repository terms differ; see [API research](docs/research/isthereanydeal-sale-data.md)). Bundle choice/add-on rules are not fully specified by the API, so inspect provider terms before buying. This is not an affiliated ITAD product or an availability guarantee.
+## Database and administration
 
-See `deploy/arcane/README.md` for the independent offer service/timer and credential setup.
+The complete authoritative history is `migrations/`, **not** the two-table Drizzle model. Runtime adapters never create tables. Setup reapplication checks checksums/schema and preserves data/sequence; it is not a reset or adoption mechanism. Read the [bootstrap](docs/operations/d1-local-bootstrap.md), [manual tools](docs/operations/d1-manual-tools.md) and [transfer/recovery](docs/operations/d1-transfer-recovery.md) guides.
 
-### Steam catalog refresh
+| Command | Prepared behavior |
+| --- | --- |
+| `db:migrate:local`, `db:push`, `db:setup-worker` | Explicit complete bootstrap, requires `--local --persist-to`; no remote default |
+| `db:generate --name <name> --sql-file <reviewed-file>` | Validate a reviewed candidate on disposable native D1 and append immutable SQL; never apply production |
+| `db:studio`, `db:inspect` | Read-only CLI schema/counts/bounded samples, explicit local or authorized application scope; replaces direct-Turso Studio |
+| `db:transfer --help` | Explicit inventory/export/import/validate/prepare-rollback; local CLI or separately approved supplied operator handles |
+| `db:rehearse --local --destination <new-private-directory>` | Synthetic complete request/client/transfer/recovery rehearsal only |
 
-`bun run catalog:refresh` uses official Steam endpoints instead of SteamSpy for the reliability-critical catalog path:
+Remote schema application is a separately approved native operator workflow, not arbitrary SQL on the machine endpoint. Interrupted imports remain incomplete and unpromotable; preserve them and restore into a **fresh explicitly bootstrapped target**, never append/replay/reset by default.
 
-1. `IStoreService/GetAppList` with `include_games=true` supplies the Steam app catalog.
-2. `store.steampowered.com/appreviews/<appId>` supplies review totals for each app.
-3. Turso rows are upserted for new games above the review threshold, and existing rows refresh `name`, `steam_review_score`, and `steam_review_count`.
+## Viewer capabilities
 
-The job checkpoints progress in `catalog_refresh_state` and records per-app failures in `catalog_refresh_failures`, so a full-catalog run can resume after interruption. It is safe to rerun.
+The unchanged viewer retains Value Score/review/time ranking, filters for early access/played/MMO/ignored state, co-op modes, controller support, single-player, Steam links, Steam Status metadata and the city-builder view. Populated 100- and 500-game pages are supported without reducing public limits.
 
-Defaults:
+**On sale or in bundle** combines with existing filters before pagination. The Deals column shows linked retail % off/bundle badges (mobile compact fields) and footer attribution. A dash means no usable offer, not proof no sale exists. Offers expire strictly at 24 hours or earlier provider expiration; open tabs also expire badges. Successful empty responses remove disappeared sales; missing/failed responses never renew freshness. Country/kind caches, seven-day mappings and renewable token-fenced leases remain distinct from Steam Status and Value Score.
 
-- `--min-reviews 10` inserts new games with at least 10 total Steam reviews. Existing rows refresh even if their count later falls below the threshold.
-- `--review-delay-ms 500` waits between per-app review requests.
-- `--retries 5` with `--retry-delay-ms 5000` handles transient Steam failures.
-- `--batch-size 200` writes Turso changes in batches.
-- `--checkpoint-every 50` persists progress every 50 processed apps.
+Check provider terms for activation/DRM, vouchers and bundle choice/add-on conditions. Affiliate links remain unchanged. This is not an affiliated ITAD product or an availability guarantee. See [ITAD research](docs/research/isthereanydeal-sale-data.md) and the [arcane runbook](deploy/arcane/README.md).
 
-Useful examples:
+## Scheduled and historical tools
 
-```bash
-bun run catalog:refresh -- --dry-run --limit-apps 25
-bun run catalog:refresh -- --restart                 # fresh full run
-bun run catalog:refresh -- --min-reviews 100         # old import threshold
-bun run catalog:refresh -- --start-after-app-id 620  # manual resume point
-```
+Every historical entrypoint remains; [all 30 Drizzle tools and their status](docs/operations/d1-manual-tools.md#full-consumer-status) and the [complete constructor/entrypoint audit](docs/operations/d1-consumer-schema-inventory.md) list readers, inserts, enrichment, wishlist/ownership, recalculation and intentional cleanup. Provider-driven tools were not run during preparation.
 
-After a non-dry refresh that updates existing ratings, run `bun recalc` so value scores use the latest review data.
+Doppler convenience aliases (`add`, `list`, `recalc`, `catalog:refresh`, `deals:refresh`, `import`, `hydrate:tags`, `hydrate-daily`) remain for **separately authorized** external work. They do not establish database isolation. Direct Bun scripts accept an explicitly prepared protected environment. `steam:browser-sync` / `steam:browser-login` intentionally run Node; login does not construct a database client. `filter-english --remove`, `remove-ignored` and `remove-played` remain explicit destructive administration, never scheduled/bootstrap work.
 
-## Secrets
+Official catalog refresh retains Steam's `IStoreService/GetAppList` and all-language/all-purchase-type app reviews, thresholds, checkpoints/failures/resume and historical SteamSpy aliases. Defaults remain 10 minimum reviews, 500ms review delay, five provider retries with 5000ms delay, 200-change native groups (maximum 400 statements), checkpoint every 50 apps. `--dry-run`, `--restart`, `--min-reviews`, `--start-after-app-id` and `--limit-apps` remain available. Recalculate after review changes. Provider retries are not database retries: an unknown/committed write error requires persisted-state reconciliation before explicitly resuming; do not blindly rerun failure-attempt increments.
 
-Managed via Doppler (`steam-value` project):
+## Credentials (names only)
 
-| Secret | Purpose |
-|--------|---------|
-| `TURSO_DATABASE_URL` | Turso database URL |
-| `TURSO_AUTH_TOKEN` | Turso auth token |
-| `STEAM_API_KEY` | Steam Web API key (for owned games) |
-| `STEAM_ID` | Your Steam profile ID |
-| `ITAD_API_KEY` | IsThereAnyDeal API key for the external offer refresh only |
+See [distribution and protection](docs/operations/d1-credentials.md). `.env.example` and arcane templates contain blank names only. Do not fill them with secrets in Git or invoke download/sync wrappers during preparation.
 
-The primary Steam Status path does not export `steamLoginSecure`. Its HttpOnly cookie stays inside the dedicated Steel browser profile on arcane. The arcane deployment receives only `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `STEAM_API_KEY`, and `STEAM_ID`; see `deploy/arcane/README.md`.
+| Names | Destination after approved cutover |
+| --- | --- |
+| `STEAM_VALUE_DB_URL` | External clients, explicit credential-free HTTPS exact `/api/internal/db` URL |
+| `STEAM_VALUE_DB_TOKEN` | External clients and selected Worker secret only |
+| `STEAM_VALUE_ACCESS_CLIENT_ID`, `STEAM_VALUE_ACCESS_CLIENT_SECRET` | External clients only; dedicated Access service token |
+| `STEAM_API_KEY`, `STEAM_ID` | External Steam tools/status environment |
+| `STEAM_LOGIN_SECURE` | Retained manual exported-cookie tools only, never Worker/scheduled Steel job |
+| `ITAD_API_KEY` | External offers environment only |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Existing production until cutover, then protected explicit migration/rollback capability retained for recovery only |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | Approved deployment/operator environments, never routine jobs |
 
-`ITAD_API_KEY` remains in Doppler and arcane's private `deals.env`; it is **not** a Worker secret and is never bundled into frontend assets.
+## Build, promotion and recovery
 
-For local Worker dev, run `bun run secrets:dev`. For Cloudflare runtime, run `doppler run --project mission-control --config dev -- bun run secrets:sync` so Wrangler has a Cloudflare API token. Secrets are intentionally kept out of OpenTofu state.
+Unprivileged PR/push CI tests and builds without production secrets. The default-branch privileged `workflow_run` deploys only after successful `main` CI, rejects a SHA no longer current main, downloads **that run's exact tested artifact**, serializes production promotion and tags the commit. The production credential remains Worker **Editor** scoped to the existing `steam-value` Worker; no D1 provisioning, DNS, Access or Worker-creation privileges are added. Actual binding deployment permission remains UNVERIFIED until an approved capability probe/rollout.
 
-## Tech Stack
+`wrangler.toml` retains Static Assets, disabled workers.dev/preview URLs, observability and compatibility settings. The production D1 ID is deliberately absent until approved provisioning; do not invent one. No deploy/request migration hook exists. Do not deploy an integration/PR artifact manually or release either main-merge hold to test credentials against an empty database.
 
-- **Runtime**: Cloudflare Workers for the web surface; Bun for local scripts
-- **Language**: TypeScript
-- **Database**: Turso (SQLite) + Drizzle ORM for admin scripts + raw libSQL in Worker
-- **Web**: Cloudflare Worker Static Assets with vanilla HTML/TypeScript
-- **Browser automation**: Playwright over a persistent, self-hosted Steel session for Steam Status
+Follow the [explicit plan → provision → freeze/drain → import/validate → coherent Worker/all-job switch → verify → retention sequence](docs/operations/d1-cutover.md). Keep Turso-backed browsing until D1 passes final validation. After D1 writes, Worker-version rollback alone is **not** data rollback: freeze again, capture/reconcile new changes, validate the intended destination and coordinate every reader/writer's reversion. Retain read-only Turso and validated exports for **at least seven days**, then require explicit owner deletion/credential-retirement approval or approved continued retention.
+
+Account-level financial budgets/alerts belong to the owner; no application budget pause or guaranteed fixed bill is added.
