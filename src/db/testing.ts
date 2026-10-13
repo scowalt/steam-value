@@ -10,6 +10,7 @@ export interface D1TestEnv {
 export type WorkerFetch = (request: Request, env: D1TestEnv) => Response | Promise<Response>;
 
 export async function createD1TestHarness(workerFetch: WorkerFetch) {
+  Bun.gc(true);
   const runtime = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response(null, { status: 404 }); } }",
@@ -44,6 +45,7 @@ async function bundledWorker() {
 }
 
 export async function createD1WorkerTestHarness(options: D1WorkerTestOptions = {}) {
+  Bun.gc(true);
   const script = await (workerBundle ??= bundledWorker());
   const token = `synthetic-${crypto.randomUUID()}`;
   const runtime = new Miniflare({
@@ -117,6 +119,7 @@ function createHarness(runtime: Miniflare, token: string, send: (request: Reques
       if (disposed) return;
       disposed = true;
       await runtime.dispose();
+      Bun.gc(true);
     },
   };
 }
