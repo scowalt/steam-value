@@ -1,8 +1,10 @@
-import type { Client } from "@libsql/client/web";
+import { DbError, toDbError, type DbClient, type DbValue } from "../db/access.ts";
 
 const SYNC_STATE_KEY = "steam_status";
 const LOCK_TTL_SECONDS = 15 * 60;
 const BATCH_SIZE = 200;
+
+class SteamStatusError extends Error {}
 
 export interface SteamStatusEnv {
   STEAM_API_KEY?: string;
@@ -28,9 +30,19 @@ interface GetOwnedGamesResponse {
   };
 }
 
-interface SteamLibrarySnapshot {
+export interface SteamLibrarySnapshot {
   ownedGames: Map<number, number>;
   recentlyPlayedGames: Map<number, number>;
+}
+
+export interface SteamStatusSource {
+  userData(): Promise<SteamUserData>;
+  library(): Promise<SteamLibrarySnapshot>;
+}
+
+export interface SteamStatusOptions {
+  source?: SteamStatusSource;
+  now?: () => number;
 }
 
 interface CurrentGameStatus {
@@ -76,24 +88,7 @@ export interface SyncResult {
   state?: SyncState | null;
 }
 
-export async function ensureSyncStateTable(client: Client): Promise<void> {
-  await client.execute(`CREATE TABLE IF NOT EXISTS sync_state (
-    key TEXT PRIMARY KEY,
-    last_attempt_at INTEGER,
-    last_success_at INTEGER,
-    last_error TEXT,
-    is_running INTEGER NOT NULL DEFAULT 0,
-    lock_expires_at INTEGER,
-    ignored_count INTEGER NOT NULL DEFAULT 0,
-    wishlist_count INTEGER NOT NULL DEFAULT 0,
-    owned_count INTEGER NOT NULL DEFAULT 0,
-    games_updated INTEGER NOT NULL DEFAULT 0,
-    games_removed INTEGER NOT NULL DEFAULT 0,
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-  )`);
-}
-
-export async function getSyncState(client: Client): Promise<SyncState | null> {
+export async function getSyncState(client: DbClient): Promise<SyncState | null> {
   try {
     const result = await client.execute({
       sql: "SELECT * FROM sync_state WHERE key = ?",
@@ -105,43 +100,45 @@ export async function getSyncState(client: Client): Promise<SyncState | null> {
 
     return mapSyncState(row);
   } catch (error) {
-    if (isMissingSyncStateTable(error)) return null;
-    throw error;
+    const safe = toDbError(error);
+    if (isMissingSyncStateTable(safe)) return null;
+    throw safe;
   }
 }
 
 export async function syncSteamStatus(
-  client: Client,
-  env: SteamStatusEnv
+  client: DbClient,
+  env: SteamStatusEnv,
+  options: SteamStatusOptions = {}
 ): Promise<SyncResult> {
+  const source = options.source ?? {
+    userData: () => fetchSteamUserData(env),
+    library: () => fetchSteamLibrary(env),
+  };
   return runSteamStatusSync(client, async () => {
-    const [userData, library] = await Promise.all([
-      fetchSteamUserData(env),
-      fetchSteamLibrary(env),
-    ]);
-
+    const [userData, library] = await Promise.all([source.userData(), source.library()]);
     return { userData, ...library };
-  });
+  }, options.now ?? unixNow);
 }
 
 export async function syncSteamStatusFromUserData(
-  client: Client,
+  client: DbClient,
   env: SteamStatusEnv,
-  userData: SteamUserData
+  userData: SteamUserData,
+  options: SteamStatusOptions = {}
 ): Promise<SyncResult> {
   return runSteamStatusSync(client, async () => {
-    const library = await fetchSteamLibrary(env);
+    const library = await (options.source?.library() ?? fetchSteamLibrary(env));
     return { userData, ...library };
-  });
+  }, options.now ?? unixNow);
 }
 
 async function runSteamStatusSync(
-  client: Client,
-  loadData: () => Promise<{ userData: SteamUserData } & SteamLibrarySnapshot>
+  client: DbClient,
+  loadData: () => Promise<{ userData: SteamUserData } & SteamLibrarySnapshot>,
+  now: () => number
 ): Promise<SyncResult> {
-  await ensureSyncStateTable(client);
-
-  const lockExpiresAt = await acquireSyncLock(client);
+  const lockExpiresAt = await acquireSyncLock(client, now());
   if (!lockExpiresAt) {
     return {
       success: false,
@@ -158,17 +155,20 @@ async function runSteamStatusSync(
 
   try {
     const previousState = await getSyncState(client);
-    const { userData, ownedGames, recentlyPlayedGames } = await loadData();
+    const { userData, ownedGames, recentlyPlayedGames } = await loadData().catch((error) => {
+      if (error instanceof SteamStatusError) throw error;
+      throw new SteamStatusError("Steam provider request failed");
+    });
     const counts = getSteamStatusCounts(userData, ownedGames);
     const validationError = validateSteamStatusCounts(counts, previousState);
-    if (validationError) throw new Error(validationError);
+    if (validationError) throw new SteamStatusError(validationError);
 
     const currentGames = await fetchCurrentGameStatuses(client);
 
     const ignoredSet = new Set(Object.keys(userData.rgIgnoredApps!).map(Number));
     const wishlistSet = new Set(userData.rgWishlist!);
 
-    const updates: { sql: string; args: (number | boolean | null)[] }[] = [];
+    const updates: { sql: string; args: DbValue[] }[] = [];
 
     for (const game of currentGames) {
       const isIgnored = ignoredSet.has(game.steamAppId);
@@ -218,13 +218,15 @@ async function runSteamStatusSync(
       gamesRemoved: 0,
     };
 
-    await markSyncSuccess(client, result, lockExpiresAt);
+    await markSyncSuccess(client, result, lockExpiresAt, now());
     result.state = await getSyncState(client);
 
     return result;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown Steam Status refresh error";
-    await markSyncFailure(client, message, lockExpiresAt);
+    const safe = error instanceof SteamStatusError ? error : toDbError(error);
+    if (safe instanceof DbError && (safe.outcome === "unknown" || safe.outcome === "committed")) throw safe;
+    const message = safe.message;
+    await markSyncFailure(client, message, lockExpiresAt, now());
 
     return {
       success: false,
@@ -292,8 +294,7 @@ function isSuspiciousDrop(previous: number, current: number): boolean {
   return previous >= 10 && current < Math.floor(previous * 0.2);
 }
 
-async function acquireSyncLock(client: Client): Promise<number | null> {
-  const now = unixNow();
+async function acquireSyncLock(client: DbClient, now: number): Promise<number | null> {
   const lockExpiresAt = now + LOCK_TTL_SECONDS;
 
   const result = await client.execute({
@@ -315,15 +316,13 @@ async function acquireSyncLock(client: Client): Promise<number | null> {
         OR sync_state.lock_expires_at IS NULL
         OR sync_state.lock_expires_at < ?`,
     args: [SYNC_STATE_KEY, now, lockExpiresAt, now, now],
-  });
+  }).catch((error) => { throw toDbError(error); });
 
   return result.rowsAffected > 0 ? lockExpiresAt : null;
 }
 
-async function markSyncSuccess(client: Client, result: SyncResult, lockExpiresAt: number): Promise<void> {
-  const now = unixNow();
-
-  await client.execute({
+async function markSyncSuccess(client: DbClient, result: SyncResult, lockExpiresAt: number, now: number): Promise<void> {
+  const completed = await client.execute({
     sql: `UPDATE sync_state SET
       last_success_at = ?,
       last_error = NULL,
@@ -348,10 +347,10 @@ async function markSyncSuccess(client: Client, result: SyncResult, lockExpiresAt
       lockExpiresAt,
     ],
   });
+  if (completed.rowsAffected !== 1) throw new SteamStatusError("Steam Status refresh lost completion lock");
 }
 
-async function markSyncFailure(client: Client, error: string, lockExpiresAt: number): Promise<void> {
-  const now = unixNow();
+async function markSyncFailure(client: DbClient, error: string, lockExpiresAt: number, now: number): Promise<void> {
 
   await client.execute({
     sql: `UPDATE sync_state SET
@@ -361,12 +360,12 @@ async function markSyncFailure(client: Client, error: string, lockExpiresAt: num
       updated_at = ?
     WHERE key = ? AND lock_expires_at = ?`,
     args: [error, now, SYNC_STATE_KEY, lockExpiresAt],
-  });
+  }).catch((error) => { throw toDbError(error); });
 }
 
 async function fetchSteamUserData(env: SteamStatusEnv): Promise<SteamUserData> {
   if (!env.STEAM_LOGIN_SECURE) {
-    throw new Error("Missing STEAM_LOGIN_SECURE");
+    throw new SteamStatusError("Missing STEAM_LOGIN_SECURE");
   }
 
   const response = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
@@ -376,7 +375,7 @@ async function fetchSteamUserData(env: SteamStatusEnv): Promise<SteamUserData> {
   });
 
   if (!response.ok) {
-    throw new Error(`Steam dynamicstore error: ${response.status}`);
+    throw new SteamStatusError(`Steam dynamicstore error: ${response.status}`);
   }
 
   return (await response.json()) as SteamUserData;
@@ -384,7 +383,7 @@ async function fetchSteamUserData(env: SteamStatusEnv): Promise<SteamUserData> {
 
 async function fetchSteamLibrary(env: SteamStatusEnv): Promise<SteamLibrarySnapshot> {
   if (!env.STEAM_API_KEY || !env.STEAM_ID) {
-    throw new Error("Missing STEAM_API_KEY or STEAM_ID");
+    throw new SteamStatusError("Missing STEAM_API_KEY or STEAM_ID");
   }
 
   const ownedGamesUrl = createPlayerServiceUrl("GetOwnedGames", env);
@@ -399,10 +398,10 @@ async function fetchSteamLibrary(env: SteamStatusEnv): Promise<SteamLibrarySnaps
   ]);
 
   if (!ownedGamesResponse.ok) {
-    throw new Error(`Steam owned games error: ${ownedGamesResponse.status}`);
+    throw new SteamStatusError(`Steam owned games error: ${ownedGamesResponse.status}`);
   }
   if (!recentlyPlayedResponse.ok) {
-    throw new Error(`Steam recently played games error: ${recentlyPlayedResponse.status}`);
+    throw new SteamStatusError(`Steam recently played games error: ${recentlyPlayedResponse.status}`);
   }
 
   const ownedGamesData = (await ownedGamesResponse.json()) as GetOwnedGamesResponse;
@@ -437,31 +436,31 @@ export function resolvePlaytimeMinutes(
   return values.length > 0 ? Math.max(...values) : null;
 }
 
-async function fetchCurrentGameStatuses(client: Client): Promise<CurrentGameStatus[]> {
-  const result = await client.execute(`
-    SELECT
-      id,
-      steam_app_id,
-      is_ignored,
-      is_on_wishlist,
-      is_owned,
-      playtime_minutes
-    FROM games
-  `);
-
-  return result.rows.map((row) => ({
-    id: Number(row.id),
-    steamAppId: Number(row.steam_app_id),
-    isIgnored: toBoolean(row.is_ignored),
-    isOnWishlist: toBoolean(row.is_on_wishlist),
-    isOwned: toBoolean(row.is_owned),
-    playtimeMinutes: row.playtime_minutes == null ? null : Number(row.playtime_minutes),
-  }));
+async function fetchCurrentGameStatuses(client: DbClient): Promise<CurrentGameStatus[]> {
+  const games: CurrentGameStatus[] = [];
+  let lastId: number | null = null;
+  for (;;) {
+    const result = await client.execute({
+      sql: `SELECT id, steam_app_id, is_ignored, is_on_wishlist, is_owned, playtime_minutes
+        FROM games ${lastId === null ? "" : "WHERE id > ?"} ORDER BY id LIMIT 1000`,
+      args: lastId === null ? [] : [lastId],
+    });
+    games.push(...result.rows.map((row) => ({
+      id: Number(row.id),
+      steamAppId: Number(row.steam_app_id),
+      isIgnored: toBoolean(row.is_ignored),
+      isOnWishlist: toBoolean(row.is_on_wishlist),
+      isOwned: toBoolean(row.is_owned),
+      playtimeMinutes: row.playtime_minutes == null ? null : Number(row.playtime_minutes),
+    })));
+    if (result.rows.length < 1000) return games;
+    lastId = Number(result.rows.at(-1)!.id);
+  }
 }
 
 async function runBatches(
-  client: Client,
-  statements: { sql: string; args: (number | boolean | null)[] }[]
+  client: DbClient,
+  statements: { sql: string; args: DbValue[] }[]
 ): Promise<void> {
   for (let i = 0; i < statements.length; i += BATCH_SIZE) {
     await client.batch(statements.slice(i, i + BATCH_SIZE), "write");
