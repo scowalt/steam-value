@@ -118,6 +118,18 @@ The new released-scope native operator regression proves no implicit application
 
 Earlier red runs (`EBADF`, control-pipe failure and teardown timeout) and discarded diagnostic candidates remain under `/tmp/steam-value-d1-26-evidence/`; they were not accepted as repairs. The measured cause and exact compatibility boundary are recorded in the [shared repair](d1-catalog-test-repair.md). New red→green/persistence/full-suite/build evidence is in its `shared-native/` subdirectory, with owned directories **0700** and files **0600**. Durable tests are the reproducible evidence; no source snapshot/receipt is checked into Git. Initial worktree was clean at integration `0bf4735bf4c86087c5d89df47d89cc7860426791`; shared-file overlap remains coordinated with the merger. Immutable migration `0001_complete_schema.sql` retains SHA-256 `bcb5a3738c65336b9af697be9816d3039edffd9da0ef627cc50da5ecf5d0a83a`.
 
+### Recheck with accepted refresh jobs (#22)
+
+Merged latest accepted integration `4c59cce9249fc46558c4efe489221fe15729a119` into #26. The shared native owner, migration CLI adoption, operator/default bootstrap and test callbacks are byte-identical to `5cd9772247b54a4dd6795bd52dec8fb34dadf6c3`; no transfer algorithms, interfaces or migration bytes changed. The full suite now includes all 38 accepted Steam Status/offer/job cases, including native Node 24/Playwright loading and fake-provider manual/hourly entrypoints.
+
+| Protected artifact | Unfiltered result | Assertions | Files | Duration |
+| --- | --- | --- | --- | --- |
+| `jobs-integration/full-1.log` | 189 pass / 0 fail | 1109 | 14 | 138.52 s |
+| `jobs-integration/full-2.log` | 189 pass / 0 fail | 1109 | 14 | 139.69 s |
+| `jobs-integration/full-3.log` | 189 pass / 0 fail | 1109 | 14 | 141.70 s |
+
+`jobs-integration/build-six-projects.log` passes the normal six-project typecheck and production build. Comment policy checks 154 files without violations; all 13 policy regressions, whitespace and secret checks pass. Evidence remains owned mode-0700 directories/mode-0600 files under `/tmp/steam-value-d1-26-evidence/`. These are local preparation checks only; every live-source, deployment, cutover and retention approval remains held.
+
 ## Manual rollback and retention gates
 
 Freeze/drain **again** before rollback preparation and use a new attestation for the actual post-cutover D1 source. Supply the approved final baseline snapshot and a new protected destination:
