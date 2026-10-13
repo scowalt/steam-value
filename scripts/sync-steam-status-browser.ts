@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createExternalClient } from "../src/db/http.ts";
+import { toDbError } from "../src/db/access.ts";
 import { chromium, type Browser, type Page } from "playwright";
 import {
   syncSteamStatusFromUserData,
@@ -10,6 +11,8 @@ const STEAM_HOME_URL = "https://store.steampowered.com/";
 const STEAM_LOGIN_URL = "https://store.steampowered.com/login/";
 const STEAM_USER_DATA_PATH = "/app/api/user-data-dir";
 const LOGIN_TIMEOUT_MS = Number(process.env.STEEL_LOGIN_TIMEOUT_MS ?? 30 * 60 * 1000);
+
+class SteamBrowserError extends Error {}
 
 interface SteelSession {
   id: string;
@@ -29,7 +32,7 @@ try {
   );
 
   const context = browser.contexts()[0];
-  if (!context) throw new Error("Steel session did not create a browser context");
+  if (!context) throw new SteamBrowserError("Steel session did not create a browser context");
 
   const page = context.pages()[0] ?? (await context.newPage());
 
@@ -46,7 +49,7 @@ try {
     await page.goto(STEAM_HOME_URL, { waitUntil: "domcontentloaded", timeout: 60_000 });
     const cookies = await context.cookies(STEAM_HOME_URL);
     if (!cookies.some((cookie) => cookie.name === "steamLoginSecure")) {
-      throw new Error("Steel Steam profile is not authenticated; run with --login");
+      throw new SteamBrowserError("Steel Steam profile is not authenticated; run with --login");
     }
 
     const userData = await fetchSteamUserData(page);
@@ -64,7 +67,7 @@ try {
       );
 
       if (!result.success) {
-        throw new Error(result.error ?? "Steam Status refresh failed");
+        throw new SteamBrowserError(result.error ?? "Steam Status refresh failed");
       }
 
       console.log(
@@ -74,6 +77,9 @@ try {
       client.close();
     }
   }
+} catch (error) {
+  console.error(`[Steam Status] ${error instanceof SteamBrowserError ? error.message : toDbError(error).message}`);
+  process.exitCode = 1;
 } finally {
   await browser?.close().catch(() => undefined);
   if (session) await releaseSteelSession(steelBaseUrl, session.id).catch(() => undefined);
@@ -92,7 +98,7 @@ async function createSteelSession(baseUrl: string, interactive: boolean): Promis
   });
 
   if (!response.ok) {
-    throw new Error(`Steel session creation failed: ${response.status} ${await response.text()}`);
+    throw new SteamBrowserError(`Steel session creation failed: ${response.status}`);
   }
 
   return (await response.json()) as SteelSession;
@@ -101,7 +107,7 @@ async function createSteelSession(baseUrl: string, interactive: boolean): Promis
 async function releaseSteelSession(baseUrl: string, sessionId: string): Promise<void> {
   const response = await fetch(`${baseUrl}/v1/sessions/${sessionId}/release`, { method: "POST" });
   if (!response.ok && response.status !== 404) {
-    throw new Error(`Steel session release failed: ${response.status}`);
+    throw new SteamBrowserError(`Steel session release failed: ${response.status}`);
   }
 }
 
@@ -124,7 +130,7 @@ async function waitForSteamLogin(page: Page, timeoutMs: number): Promise<SteamUs
     await delay(3_000);
   }
 
-  throw new Error("Timed out waiting for Steam login");
+  throw new SteamBrowserError("Timed out waiting for Steam login");
 }
 
 async function fetchSteamUserData(page: Page): Promise<SteamUserData> {
@@ -152,7 +158,7 @@ export function resolveSteelUrl(value: string, baseUrl: string): string {
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
-  if (!value) throw new Error(`Missing ${name}`);
+  if (!value) throw new SteamBrowserError(`Missing ${name}`);
   return value;
 }
 
