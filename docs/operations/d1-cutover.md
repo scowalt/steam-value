@@ -1,0 +1,94 @@
+# D1 provisioning, coherent cutover and data-aware recovery
+
+**Runbook only — no production operation is authorized or performed by preparation. Production stays Turso; BOTH application and companion main merges are held.** Approved design: [#17](https://github.com/scowalt/steam-value/issues/17), [plan/approval map](d1-acceptance-map.md), [ADR 0004](../adr/0004-move-database-to-cloudflare-d1.md). Local [#27 evidence](d1-integrated-rehearsal.md) does not close #17/#28/#29.
+
+Use the [consumer/writer inventory](d1-consumer-schema-inventory.md), [credentials](d1-credentials.md), [bootstrap](d1-local-bootstrap.md), [transfer/recovery](d1-transfer-recovery.md), [refresh failure rules](d1-refresh-jobs.md) and [arcane procedures](../../deploy/arcane/README.md) together. Public records contain only safe results/commit IDs; source, schema details, exports, receipts, plans and reconciliation records stay in protected storage outside Git/public artifacts.
+
+## 1. Plan and authorize — STOP while a gate is missing
+
+Parent completes independent Standards **and** Spec review of application changes from `299c9e20feb23dfb5aaa8913d16eafc94fcfd123` and companion preparation from `f7e77d094e5b66b93d5a3a773a67bcb327466e19`; findings converge in one implementer. Recheck against latest integration and then-current main, rerun all tests/seven type projects/build/policy/secrets, and have the parent handle ticket evidence and implementer cleanup. Preserve unrelated research/canonical dirty work. No preparer may claim external review or close tickets.
+
+Obtain **separate recorded owner decisions** for:
+
+- Any Workers subscription change, after verifying actual account-wide Paid eligibility/capacity.
+- Production protected D1/Access provisioning and dedicated credential operations, including the exact saved infrastructure plan.
+- Authorized source schema/data access, remote rehearsal and the selected explicit operator runner/handles.
+- A maintenance window, final import and coherent Worker/**every consumer** switch, including exactly when each held main merge may be released.
+- Later data-aware rollback/replay if necessary, and deletion/credential retirement after ≥7 days (or continued retention).
+
+**UNVERIFIED gates:** actual account/subscription/permissions and full shared-root plan; actual source objects/defaults/types/data/sizes/query durations/high-water; installed/manual/out-of-repo writers; edge Service Auth precedence/alternate routes; actual Worker Editor binding deployment; production data/job/provider/browser/admin behavior. A green suite, matching counts, successful deployment or HTTP health response waives none of these gates. Stop and record safe evidence, attempted paths, blocker and exact next owner input; do not lower guards, widen privileges or invent IDs.
+
+## 2. Provision the protected resource — application hold remains
+
+Companion read-only handoff: `/tmp/steam-value-d1-17-plan/mission-control-integration`, branch `integration/steam-value-d1-17`, reviewed preparation tip `da48a80ab04707bc89de4f3f57ab021a0fab1370`. Its `docs/operations/steam-value-d1-preparation.md` is the infrastructure procedure. Preparation did not initialize its backend, plan against live state, apply or retrieve secrets.
+
+After authorization, a clean approved operator worktree reviews the **full** mission-control saved plan privately. Expected additions are the stable `steam-value` D1 resource with primary-only reads and `prevent_destroy`, exact machine-path Service Auth application/policy referencing dedicated externally provisioned resource UUIDs, and non-secret outputs. Preserve viewer Access/domain, disabled workers.dev/preview routes, empty cron and application ownership of script/assets/bindings. Stop on unrelated changes, replacement/deletion or secret-generating resources. Do not use targeting/exclusion, state surgery or removal of protection to get a plan through. `prevent_destroy` does not protect out-of-band deletion or removal of its resource block.
+
+Only an explicitly accepted saved plan may be applied. Capture non-secret ID/name/endpoint for the application's reviewed binding configuration; never guess a production ID. Keep D1/Access/backend/subscription administration separate from ordinary Worker Editor. Distribute credentials through the [protected ownership workflow](d1-credentials.md), not IaC state or routine job account tokens.
+
+Establish an approved native operator execution environment for `applyMigrations`/transfer target handles and an explicitly supplied read-only source handle. **The shipped CLI is local-only; no remote runner or production handle is discovered by it.** #28 must review/provide and verify that execution capability before the live procedure is executable. If a protected rehearsal requires a temporary operator Worker/binding, it needs explicit separate authorization; do not add a general public SQL/admin endpoint or deploy the production viewer to empty D1 to obtain a handle. Schema/PRAGMA/import never goes through `/api/internal/db`.
+
+## 3. Inventory and rehearse the authorized source
+
+Before final migration, obtain complete actual `sqlite_schema`, ordered columns/nullability/defaults/constraints, backing/explicit/partial indexes, triggers/views/FKs, exact internal metadata and `sqlite_sequence`; measure supported storage types/unsafe integers/UTF-8 sizes, all-table contents/orphans/countries, counts and representative durations. `inventorySource` fails closed on unresolved drift and preserves a protected diagnostic where possible. Do not infer the seven-table local schema equals production or silently discard extra objects. In particular resolve `sync_state.updated_at`, client-only game timestamps and deleted-ID high-water.
+
+Resolve drift with the owner in reviewed versioned schema/tool changes; append immutable migrations rather than edit applied checksums. Conservatively different SQL/metadata may currently stop transfer. No unsupported row may be clipped, normalized or omitted to make counts match. If the source cannot be safely represented, hold cutover.
+
+On an authorized immutable/frozen copy, rehearse complete export → explicit bootstrap → pristine staging import → full schema/typed-content/sequence validation → representative actual Worker/client behavior → fresh restore/recovery. Verify all seven tables and operational rows, not only ORM tables. A verifier must assert viewer/order/filter/100–500-page results, typed Steam Status/Playtime, catalog checkpoint/failure attempts and offer null/empty/country/freshness. No provider calls are needed for read-only validation. Preserve protected snapshot/receipt pointers and safe comparison summaries.
+
+Imports are bounded native transactions **per group, not whole import**. `imported` is not `validated`; incomplete/unknown receipts cannot promote. Preserve failed targets/receipts, inspect, then select and explicitly bootstrap a **fresh** target with a new receipt for full restore. Do not append/replay into a partial target, reset a populated database or relax behavior validation. CLI `validate` without reviewed behavior assertions deliberately stops at `BEHAVIOR_REQUIRED`.
+
+## 4. Freeze and drain every writer during the approved window
+
+Keep the existing Turso-backed viewer available. Re-inventory **actually installed** writers and obtain acknowledgements, not just a repo search. Arcane [units](../../deploy/arcane/README.md#approved-freeze-drain-and-resume) are daily Steam Status and hourly offers, persistent/jittered with active runtimes up to 10/45 minutes. Stop their timers, allow in-flight services to complete safely, and verify services/processes/children have drained. If forced termination is necessary, stop and reconcile potential partial/unknown writes before attesting a frozen source. Do not stop Steel or delete/recreate its volume/profile.
+
+Drain/disable launches of all manual and out-of-repo writers: catalog and both historical aliases, exported-cookie status, inserts/analysis tools, all enrichment/ownership/wishlist work, HowLongToBeat corrections, recalculation, destructive cleanup, schema/generation/setup/admin work and any old installed runtime initializers. A failed/skipped/no-change job may still write lease/error/checkpoint/counter state. Timers stopped or leases expired do **not** prove a global freeze; the original Steam update groups are unfenced.
+
+Record source identity, freeze time, paused **and** drained writers, manual-owner acknowledgements, consistency method/evidence pointer and hold-until-release in a protected `FreezeRecord`. Constructing the record does not pause writers. Matching double scans only detect observed changes; they do not independently prove quiescence. Keep the freeze through final snapshot, target validation and coherent promotion; coordinate persistent-timer catch-up only at resumption.
+
+## 5. Final export, import and validate — no promotion on a partial result
+
+With all writers frozen, use the reviewed read-only source handle and new protected destination:
+
+1. `inventorySource(source, privateInventoryDirectory)`; stop on drift/data extremes.
+2. `exportSnapshot(source, privateSnapshotDirectory, freezeRecord)`; require complete receipt, all-table typed files/digests/schema/sequence and matching second scan.
+3. Explicitly `applyMigrations(selectedNativeTarget, await loadMigrations())` under exclusive schema ownership. Confirm a deliberately selected **pristine** target and reviewed checksum history. No request/deploy/refresh hook performs this.
+4. `importSnapshot(targetWithNewReceiptAndIntent, snapshot)`; require completed `imported`, not an incomplete/unknown receipt.
+5. `validateSnapshot(targetWithReviewedReadOnlyBehaviorVerifier, snapshot)`; require full typed schema/content/sequence equivalence and actual target Worker/client behavior, then a second unchanged full-content scan and `validated` receipt.
+
+The proposed production Worker artifact must bind the exact validated D1 ID and schema-compatible code. An approved isolated native Worker probe may validate the target without switching the public Turso viewer. Lack of a safe probe/runner is a blocker, not permission to route production to unvalidated data. Keep Turso browsing until D1 validates; a brief viewer interruption at switch is acceptable. No dual-writing or automatic fallback.
+
+## 6. Coherent Worker + every job/manual consumer cutover
+
+After final validation **and explicit release approval**, coordinate both repository promotions and arcane/manual installation under the held freeze. Do not allow any writer to run with old Turso code/configuration while the viewer or another writer uses D1. Record tested SHA, binding ID, snapshot/validation pointer, rollback baseline, installed consumer revisions and protected environment-distribution acknowledgements.
+
+Preserve CI: PR CI remains unprivileged; only successful current `main` CI can trigger the default-branch privileged deploy; exact artifact `worker-<tested SHA>` comes from that successful run, not a rebuilt/manual integration artifact; production promotions serialize and retain the existing narrow Worker Editor credential. Do not manually deploy, bypass stale-main checks or add automatic migration hooks. Verify the actual token can deploy the native binding only in an approved probe/rollout; a permission failure leaves writers frozen and stops promotion, not permission to broaden the token.
+
+Install the **tested complete code/dependency tree** on arcane and approved manual environments with the four external keys; keep Node 24/Playwright, Steel profile/volume/CDP/cookie, service timeouts and daily/hourly schedules unchanged. There is no default backend selector/fallback. Retain protected legacy artifacts/credentials for recovery, but prevent ordinary Turso writers after switch. The local preparation does not modify installed services or active environments.
+
+Before resuming, verify in the approved hosted environment:
+
+- Root viewer Access login, games/filter/ranking/city-builders, populated 100/500 pages, state/offer response contracts, stable IDs and content parity.
+- Machine path rejects absent/invalid Access tokens, viewer sessions alone, absent/invalid bearer, selectors/malformed bodies/admin SQL and alternate methods/path forms without effects. Valid dual credentials reach only the bound Steam Value database. Explicitly verify workers.dev and preview routes remain disabled; do not open them for debugging.
+- Actual scoped binding deployment, read-after-write/grouped-read/native atomic behavior and representative raw/Drizzle/manual paths, using approved isolated or tightly controlled verification data.
+- Deliberately resume one Steam Status run and one offers run, then verify persisted successful data/counts/Playtime/freshness/leases/errors and relevant administrative/catalog behavior. Do not mutate production merely to test destructive cleanup; rehearse it on an authorized copy. Health/deploy success alone is insufficient.
+
+Stop on unknown/committed write errors: freeze affected launches, inspect supported state/business keys/lease expiry or token/checkpoints and reconcile before an explicitly authorized resume. No SQL/transport replay or speculative lease clear. After successful checks, deliberately restore the existing timer enabled state, account for persistent catch-up/jitter, verify no old process/configuration remains and record the retention start time. If coherent promotion or verification fails, remain frozen and follow recovery, never thaw half the consumers.
+
+## 7. Manual, data-aware rollback
+
+Worker version rollback can restore code, **not data**. Never automatically fall back to Turso.
+
+1. Obtain/record the recovery decision, freeze/drain all D1 writers again and establish a **new actual-source** freeze attestation. Inspect uncertain writes before relying on a checkpoint/lease/receipt.
+2. `prepareRollback(postCutoverD1Source, approvedFinalBaselineSnapshot, newPrivateRecoveryDirectory)` captures a complete post-cutover snapshot, before/after typed row deltas (including deletes/orphans/attempts), manifest digests and sequence change. Require the complete `reconciliation-required` receipt with `automaticReversion: false`; even zero delta is not automatic rollback permission.
+3. Review declared keys/full values and sequence state; preserved rowid delta is **not an automatically replayable SQL plan**. Resolve conflicts/replay policy with the owner, including non-idempotent attempts, separate acknowledged groups and unfenced Steam updates. Preserve new D1 writes rather than blindly restoring the old export.
+4. Reconcile into the explicitly selected recovery destination using reviewed authorized tooling; validate full schema/typed contents/high-water and representative Worker/job behavior against the intended reconciled state. Failed/incomplete restore remains unpromotable. Retain D1 plus recovery artifacts unchanged for inspection.
+5. Only then coordinate every reader/writer's manual reversion, protected credential configuration and code rollback under the freeze, preserving tested/current-main/serialization controls or an explicitly authorized emergency version rollback. No writer resumes until all consumers point coherently to the validated destination. Revert the bad source commit through reviewed main CI so production/source converge; do not push from preparation.
+
+No automatic Turso replay, code reversion, data reset or deletion is implemented by the preparation tools. If no defensible reconciliation path remains, stop with protected evidence pointers, attempted paths, exact conflict/blocker and next owner decision required.
+
+## 8. At least seven days of retention and an owner decision
+
+Start the clock at the recorded successful cutover. Keep Turso **without further writes** and retain the validated final export, import/validation receipts and any recovery snapshots for **at least seven days**. Secure/verify their availability and permissions during the window; an artifact-retention CI setting alone is not the data-retention procedure. Preserve the necessary protected recovery credentials. Monitor ordinary safe error/state/job evidence, not credential-bearing logs; no financial budget pause/alert feature is introduced.
+
+After the window, confirm authenticated production data/jobs/admin checks and resolved review/incidents. Obtain explicit owner approval for Turso deletion and remaining legacy credential retirement, or record owner-approved continued retention. Do not infer decommission permission from elapsed time, green code or D1 use. Parent records completion/cleanup/closure; #17/#28/#29 remain open until their actual approvals, production acceptance and retention decisions are verified.

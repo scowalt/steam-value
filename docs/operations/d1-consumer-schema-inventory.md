@@ -4,9 +4,9 @@ Source baseline: `299c9e20feb23dfb5aaa8913d16eafc94fcfd123`. Line ranges below r
 
 Authority: [#17 specification](https://github.com/scowalt/steam-value/issues/17), [approved preparation plan](https://github.com/scowalt/steam-value/issues/17#issuecomment-6135327372), [approval record](https://github.com/scowalt/steam-value/issues/17#issuecomment-6135423331), [ADR 0004](../adr/0004-move-database-to-cloudflare-d1.md). [ADR 0001](../adr/0001-host-web-surface-on-cloudflare-with-turso.md), [ADR 0002](../adr/0002-run-steam-status-from-persistent-steel-browser.md), [ADR 0003](../adr/0003-deploy-worker-application-through-github-actions.md) still govern hosting, Steel/browser credentials, schedules and gated deployment. Use [GLOSSARY.md](../../GLOSSARY.md) terminology. The [access contract](d1-access-contract.md) and [acceptance map/gates](d1-acceptance-map.md) are the downstream implementation handoff.
 
-## Construction and raw-SQL entrypoints
+## Historical construction and raw-SQL entrypoints
 
-Eight non-test libSQL constructors exist; changing only the shared Drizzle client misses seven. R = reads, W = writes (including schema/state writes). Ticket numbers identify implementation ownership, not completion.
+At the source baseline, eight non-test libSQL constructors existed; changing only the shared Drizzle client would miss seven. R = reads, W = writes (including schema/state writes). Ticket numbers identify implementation ownership, not completion.
 
 | Source pointer | Current access and entrypoints | Owner |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ Injected consumers currently typed to libSQL:
 
 ## All shared Drizzle consumers
 
-All 30 import `src/db/client.ts`, operate on `games`, and belong to #24. Preserve historical/manual entrypoints; “analyze” and “verify” are not necessarily read-only.
+This baseline manifest lists all 30 consumers that import `src/db/client.ts`, operate on `games`, and belong to #24. Preserve historical/manual entrypoints; “analyze” and “verify” are not necessarily read-only.
 
 | Script (under `scripts/`) and line range | Access to preserve |
 | --- | --- |
@@ -131,6 +131,29 @@ Existing semantics to retain: renewable UUID-fenced 15-minute offer lease; mappi
 - No real-D1 authorization/client/Drizzle/rollback/grouped-read-concurrency/full-schema-transfer/recovery/destructive-multi-chunk/city-builder database coverage exists at baseline. These are downstream evidence requirements, not claims made by documentation.
 - [package.json](../../package.json):10–11 checks exactly [tsconfig.worker.json](../../tsconfig.worker.json), [tsconfig.web.json](../../tsconfig.web.json), [tsconfig.browser-sync.json](../../tsconfig.browser-sync.json). Most manual/shared-client/catalog/admin/migration code is not covered; Bun transpilation is not typechecking. #27 adds deliberate coverage.
 - [CI](../../.github/workflows/ci.yml):20–38 tests/builds without production credentials. [Deploy](../../.github/workflows/deploy.yml):14–59 enforces tested/current main, serialization, exact artifact and Worker-scoped credential with `--keep-vars`; no schema migration. [wrangler.toml](../../wrangler.toml) has no baseline D1 binding. [Lefthook](../../lefthook.yml) checks staged secrets/comments, not types/tests. Preserve [comment policy](../../.comment-policy/README.md); no SQL-migration exemption.
+
+## Integrated preparation status (#27)
+
+Prepared integration audit starts from `2d8a075a24fc9bc5d2c88793d1b81f7ca7b69c53`, after #21–#26 closed with independent blocker verification. This section updates implementation status; the historical baseline above remains the capability/writer manifest, **not actual production inventory**. Existing production stays Turso. Both application and companion main merges remain held until separately approved provisioning/cutover. See [integrated evidence](d1-integrated-rehearsal.md), [credentials](d1-credentials.md) and [cutover/retention procedures](d1-cutover.md). Independent final Standards/Spec review and cleanup/closure remain parent-owned.
+
+| Active surface | Prepared access / coverage |
+| --- | --- |
+| Worker `index.ts`, viewer `games.ts`, game/state/deal readers | Native `createD1Client(env.DB)` only. Existing human routes plus exact machine POST; no cached libSQL client, runtime schema initialization or fallback. Worker type project plus native request/viewer regression. |
+| `src/db/client.ts` and every one of the 30 scripts above | One shared `createExternalClient(process.env)` for raw and SQLite-proxy access; explicit complete readers, bounded insert/wishlist/delete groups and safe ORM errors in `manual.ts`. All 30 preserved in `tsconfig.manual.json`; see [per-entrypoint status](d1-manual-tools.md#full-consumer-status). |
+| `recalculate.ts` | Shared raw/ORM client, unchanged formula and independent 200-game atomic updates; no second constructor/destination. |
+| Scheduled browser Steam Status, manual `hydrate-daily`, hourly `refresh-deals` | Four-key external factory and native groups; no ensures/DDL. Browser-sync types/tests include actual Bun entrypoints and Node 24/Playwright compatibility. `--login` is write-free and does not construct a DB client. Units/Steel/profile/schedules are unchanged. |
+| Catalog `refresh-steam-catalog`, both SteamSpy aliases / `import` | Shared external factory, complete keyset reads and bounded native flushes; checkpoint/failure/resume and dry-run retained. Catalog type project covers all entrypoints/tests. |
+| Setup/generation/inspection aliases | Explicit complete migrations/local native operator owner and read-only local or approved application inspection; no Turso push/Studio default. Offline `drizzle.config.ts` is credential-free and only a two-table model draft, not authoritative DDL. Manual/tools type projects cover these replacements. |
+| Inventory/export/import/validate/recovery | Supplied native/source handles in `transfer.ts`, local-only CLI. The only remaining non-test `@libsql/client` import is **type-only** for the explicit read-only legacy source adapter; no constructor or environment lookup. Production handles/runner require separate approval. |
+| `db:rehearse` | New explicitly local synthetic 500-game/all-seven-table actual Worker + raw/Drizzle + transfer/recovery workflow, included with its test in database-tools types. No source/account/provider discovery or deployment. |
+| Secret wrappers / environments | `.env.example` and both arcane examples now contain blank prepared four-key names plus applicable provider keys. Only `STEAM_VALUE_DB_TOKEN` is selected for Worker sync. Wrappers still explicitly use Doppler `dev` and are privileged data/secret operations, not isolated setup. Browser cookie stays in Steel; legacy names remain documented only for current production and approved recovery. |
+| CI/runtime/deployment | Original unprivileged CI and default-branch successful-current-main exact artifact/serialization/Worker Editor workflow are byte-unchanged from the spec baseline. No deploy/migration hook. Application `workers_dev = false`, explicit `preview_urls = false`; companion `enabled = false`, `previews_enabled = false`, empty cron preserved. Actual edge/credential behavior remains UNVERIFIED. |
+
+The unused exported `ensureDealTables` function had no caller after convergence. #27 removes it and its legacy SDK type import; its duplicated runtime DDL is not an operator replacement. Complete immutable `migrations/0001_complete_schema.sql` remains authoritative and byte-unchanged. Application DDL now lives only in immutable history and explicit migration metadata/operator generation; no active request/job/imported runtime adapter performs bootstrap. `@libsql/client` remains a dependency for separately supplied legacy operator handles, not ordinary application access.
+
+A seven-project `tsc --listFilesOnly` union checked every added/changed TypeScript file against baseline `299c9e20feb23dfb5aaa8913d16eafc94fcfd123`: **78 files, zero uncovered** (including transitive dependencies and the new runner/test). Normal `typecheck`/`build` invokes all seven; Bun transpilation alone is not counted. This is an audit, not an SDK/document-layout test. Build script and unrelated historical non-database tools were not rewritten/retired. Full tests retain v1 bounds, ordered ORM results, strong native read groups, affected-row leases and unknown-write/no-replay cases.
+
+**Still UNVERIFIED:** the complete actual source schema/data/default/size/duration inventory, actual installed/manual/out-of-repo writers, Paid/eligibility/permissions, edge Access precedence and alternate-route rejection, actual Worker Editor binding deployment and every production data/provider/job/admin check. Source-only inspection and a synthetic all-table restore do not waive those approval gates or authorize #17/#28/#29 closure.
 
 ## Live-source drift and freeze gates
 

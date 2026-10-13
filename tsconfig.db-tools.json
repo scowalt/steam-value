@@ -10,6 +10,7 @@
     "src/db/migrations*.ts",
     "src/db/transfer*.ts",
     "scripts/db-transfer*.ts",
+    "scripts/db-rehearse*.ts",
     "src/db/testing*.ts",
     "scripts/db-migrate*.ts"
   ]
