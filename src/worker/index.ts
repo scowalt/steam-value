@@ -1,5 +1,4 @@
-import { createClient, type Client } from "@libsql/client/web";
-import { DB_ERROR_STATUS, DB_LIMITS, encodeDbSuccess, isJsonMediaType, isRequestId, readBoundedJson, toDbError, validateStatement, validateWireRequest } from "../db/access";
+import { DB_ERROR_STATUS, DB_LIMITS, DbError, encodeDbSuccess, isJsonMediaType, isRequestId, readBoundedJson, toDbError, validateStatement, validateWireRequest } from "../db/access";
 import { createD1Client } from "../db/d1";
 import { getSyncState } from "../services/steam-status-sync";
 import { getDealRefreshStatus } from "../services/game-deals";
@@ -8,12 +7,7 @@ import { listCityBuilderGames, listGames, parseGameQuery } from "./games";
 export interface Env {
   DB?: D1Database;
   STEAM_VALUE_DB_TOKEN?: string;
-  TURSO_DATABASE_URL?: string;
-  TURSO_AUTH_TOKEN?: string;
 }
-
-let client: Client | null = null;
-let clientKey: string | null = null;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -102,19 +96,9 @@ async function handleMachineRequest(request: Request, env: Env): Promise<Respons
   }
 }
 
-function getClient(env: Env): Client {
-  if (!env.TURSO_DATABASE_URL) throw new Error("Viewer database is not configured");
-  const key = `${env.TURSO_DATABASE_URL}:${env.TURSO_AUTH_TOKEN ?? ""}`;
-
-  if (!client || clientKey !== key) {
-    client = createClient({
-      url: env.TURSO_DATABASE_URL,
-      authToken: env.TURSO_AUTH_TOKEN,
-    });
-    clientKey = key;
-  }
-
-  return client;
+function getClient(env: Env) {
+  if (!env.DB) throw new DbError("NOT_CONFIGURED", "not-applied");
+  return createD1Client(env.DB);
 }
 
 function json(data: unknown, init: ResponseInit = {}): Response {
