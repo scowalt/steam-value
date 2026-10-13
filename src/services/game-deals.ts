@@ -1,4 +1,5 @@
-import type { Client, InValue } from "@libsql/client/web";
+import type { Client } from "@libsql/client/web";
+import { DB_LIMITS, type DbClient, type DbStatement, type DbValue } from "../db/access";
 import { DEAL_COUNTRY, DEAL_MAX_AGE_SECONDS, type DealOffer, type DealRefreshStatus, type GameDeals } from "./deal-types";
 
 export { DEAL_COUNTRY, DEAL_MAX_AGE_SECONDS } from "./deal-types";
@@ -28,23 +29,31 @@ export const ON_SALE_SQL = `EXISTS (
     AND dc.checked_at > ? AND json_extract(offer.value, '$.validUntil') > ?
 )`;
 
-export function onSaleArgs(now: number): InValue[] {
+export function onSaleArgs(now: number): DbValue[] {
   return [DEAL_COUNTRY, now - DEAL_MAX_AGE_SECONDS, now];
 }
 
-export async function getGameDeals(client: Client, appIds: number[], now = unixNow()): Promise<Map<number, GameDeals>> {
+export async function getGameDeals(client: DbClient, appIds: number[], now = unixNow()): Promise<Map<number, GameDeals>> {
   const result = new Map<number, GameDeals>(appIds.map((id) => [id, { status: "unknown", checkedAt: null, offers: [] }]));
   if (!appIds.length) return result;
-  const placeholders = appIds.map(() => "?").join(",");
-  const [mapped, cached] = await client.batch([
-    { sql: `SELECT * FROM itad_game_map WHERE steam_app_id IN (${placeholders})`, args: appIds },
-    { sql: `SELECT * FROM game_deal_cache WHERE country = ? AND steam_app_id IN (${placeholders})`, args: [DEAL_COUNTRY, ...appIds] },
-  ], "read");
-  for (const row of mapped!.rows) {
+  const statements: DbStatement[] = [];
+  const chunkSize = DB_LIMITS.maxParams - 1;
+  for (let offset = 0; offset < appIds.length; offset += chunkSize) {
+    const ids = appIds.slice(offset, offset + chunkSize);
+    const placeholders = ids.map(() => "?").join(",");
+    statements.push(
+      { sql: `SELECT * FROM itad_game_map WHERE steam_app_id IN (${placeholders})`, args: ids },
+      { sql: `SELECT * FROM game_deal_cache WHERE country = ? AND steam_app_id IN (${placeholders})`, args: [DEAL_COUNTRY, ...ids] },
+    );
+  }
+  const snapshots = await client.batch(statements, "read");
+  const mapped = snapshots.filter((_, index) => index % 2 === 0).flatMap((snapshot) => snapshot.rows);
+  const cached = snapshots.filter((_, index) => index % 2 === 1).flatMap((snapshot) => snapshot.rows);
+  for (const row of mapped) {
     if (row.itad_id === null) result.set(Number(row.steam_app_id), { status: "unmapped", checkedAt: Number(row.checked_at), offers: [] });
   }
   const scopes = new Map<number, { checkedAt: number; fresh: boolean; offers: DealOffer[] }[]>();
-  for (const row of cached!.rows) {
+  for (const row of cached) {
     const checkedAt = Number(row.checked_at);
     const fresh = checkedAt > now - DEAL_MAX_AGE_SECONDS;
     const offers = JSON.parse(String(row.offers_json)) as DealOffer[];
@@ -67,7 +76,7 @@ export async function getGameDeals(client: Client, appIds: number[], now = unixN
   return result;
 }
 
-export async function getDealRefreshStatus(client: Client, now = unixNow()): Promise<DealRefreshStatus> {
+export async function getDealRefreshStatus(client: DbClient, now = unixNow()): Promise<DealRefreshStatus> {
   const result = await client.execute({ sql: "SELECT * FROM deal_refresh_state WHERE country = ?", args: [DEAL_COUNTRY] });
   const row = result.rows[0];
   const counts = await client.execute({
