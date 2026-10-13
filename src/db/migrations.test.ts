@@ -127,7 +127,9 @@ test("bootstrap supplies both partial browse indexes and the independent Steam a
     { name: "games_steam_app_id_unique", partial: 0 },
     { name: "idx_games_browse_default", partial: 1 },
     { name: "idx_games_browse_owned_playtime", partial: 1 },
+    { name: "idx_games_status_filters", partial: 0 },
     { name: "idx_games_steam_app_id", partial: 0 },
+    { name: "idx_games_value_score", partial: 0 },
   ]);
   expect((await binding.prepare("SELECT name, desc FROM pragma_index_xinfo('idx_games_browse_default') WHERE key = 1 ORDER BY seqno").all()).results)
     .toEqual([{ name: "value_score", desc: 1 }]);
@@ -168,7 +170,7 @@ test("failed migration application rolls back its schema and receipt before an e
   await expect(applyMigrations(binding, [{ id: "0001_broken.sql", sql, checksum: await migrationChecksum(sql) }]))
     .rejects.toMatchObject({ code: "MIGRATION_FAILED" });
   expect((await binding.prepare("SELECT name FROM sqlite_schema WHERE name IN ('staged', 'steam_value_migrations')").all()).results).toEqual([]);
-  expect(await applyMigrations(binding, await loadMigrations())).toMatchObject({ applied: ["0001_complete_schema.sql"], alreadyApplied: [] });
+  expect(await applyMigrations(binding, await loadMigrations())).toMatchObject({ applied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"], alreadyApplied: [] });
 });
 
 test("an explicit later migration preserves quoted SQL delimiters and ordered history", async () => {
@@ -176,14 +178,14 @@ test("an explicit later migration preserves quoted SQL delimiters and ordered hi
   const migrations = await loadMigrations();
   await applyMigrations(binding, migrations);
   const sql = `CREATE TABLE "quoted;table" (value TEXT DEFAULT 'alpha;beta''s'); INSERT INTO "quoted;table" DEFAULT VALUES;`;
-  const extended = [...migrations, { id: "0002_quoted_defaults.sql", sql, checksum: await migrationChecksum(sql) }];
+  const extended = [...migrations, { id: "0003_quoted_defaults.sql", sql, checksum: await migrationChecksum(sql) }];
   const report = await applyMigrations(binding, extended);
   expect({ report, value: await binding.prepare('SELECT value FROM "quoted;table"').first<string>("value") }).toMatchObject({
-    report: { applied: ["0002_quoted_defaults.sql"], alreadyApplied: ["0001_complete_schema.sql"] },
+    report: { applied: ["0003_quoted_defaults.sql"], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"] },
     value: "alpha;beta's",
   });
   expect(await applyMigrations(binding, extended)).toEqual({
-    applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_quoted_defaults.sql"], schemaFingerprint: report.schemaFingerprint,
+    applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql", "0003_quoted_defaults.sql"], schemaFingerprint: report.schemaFingerprint,
   });
 });
 
@@ -191,11 +193,11 @@ test("migration history must be nonempty, ordered, unique and named before any a
   const binding = await isolatedD1();
   const migrations = await loadMigrations();
   const sql = "CREATE TABLE later (id INTEGER);";
-  const later = { id: "0002_later.sql", sql, checksum: await migrationChecksum(sql) };
+  const later = { id: "0003_later.sql", sql, checksum: await migrationChecksum(sql) };
   for (const invalid of [[], [later, ...migrations], [migrations[0]!, migrations[0]!], [...migrations, { ...later, id: "0001_duplicate_version.sql" }], [{ ...later, id: "unsafe/name.sql" }]]) {
     await expect(applyMigrations(binding, invalid)).rejects.toMatchObject({ code: "INVALID_MIGRATION" });
   }
-  expect(await applyMigrations(binding, migrations)).toMatchObject({ applied: ["0001_complete_schema.sql"], alreadyApplied: [] });
+  expect(await applyMigrations(binding, migrations)).toMatchObject({ applied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"], alreadyApplied: [] });
 });
 
 test("changed applied migrations are rejected before any schema or data changes", async () => {
@@ -206,7 +208,7 @@ test("changed applied migrations are rejected before any schema or data changes"
   await expect(applyMigrations(binding, [{ id: migrations[0]!.id, sql, checksum: await migrationChecksum(sql) }]))
     .rejects.toMatchObject({ code: "MIGRATION_CHANGED" });
   expect(await applyMigrations(binding, migrations)).toEqual({
-    applied: [], alreadyApplied: ["0001_complete_schema.sql"], schemaFingerprint: original.schemaFingerprint,
+    applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"], schemaFingerprint: original.schemaFingerprint,
   });
 });
 
@@ -270,7 +272,7 @@ test("explicit bootstrap is repeatable without replacing catalog data or migrati
   ]);
   const repeated = await applyMigrations(binding, migrations);
   expect((await binding.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' AND name != 'steam_value_migrations' ORDER BY name").all()).results).toEqual([
-    { name: "catalog_refresh_failures" }, { name: "catalog_refresh_state" }, { name: "deal_refresh_state" },
+    { name: "__drizzle_migrations" }, { name: "catalog_refresh_failures" }, { name: "catalog_refresh_state" }, { name: "deal_refresh_state" },
     { name: "game_deal_cache" }, { name: "games" }, { name: "itad_game_map" }, { name: "sync_state" },
   ]);
   expect((await binding.batch([
@@ -286,8 +288,8 @@ test("explicit bootstrap is repeatable without replacing catalog data or migrati
     { name: "itad_game_map", value: 1700000000 }, { name: "sync_state", value: 1700000000 },
   ]);
   expect({ first, repeated, catalog: await binding.prepare("SELECT name FROM games").all() }).toMatchObject({
-    first: { applied: ["0001_complete_schema.sql"], alreadyApplied: [], schemaFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) },
-    repeated: { applied: [], alreadyApplied: ["0001_complete_schema.sql"], schemaFingerprint: first.schemaFingerprint },
+    first: { applied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"], alreadyApplied: [], schemaFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    repeated: { applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"], schemaFingerprint: first.schemaFingerprint },
     catalog: { results: [{ name: "Retained" }] },
   });
 });

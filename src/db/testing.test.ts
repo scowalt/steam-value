@@ -17,7 +17,7 @@ async function isolatedNativeOperator() {
   try {
     const binding = owner.binding;
     expect((await binding.prepare("SELECT name FROM sqlite_schema WHERE name IN ('games','steam_value_migrations')").all()).results).toEqual([]);
-    expect((await applyMigrations(binding, await loadMigrations())).applied).toEqual(["0001_complete_schema.sql"]);
+    expect((await applyMigrations(binding, await loadMigrations())).applied).toEqual(["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"]);
     const other = await owner.getBinding("SECONDARY");
     expect((await other.prepare("SELECT name FROM sqlite_schema WHERE name IN ('games','steam_value_migrations')").all()).results).toEqual([]);
     await expect(owner.getBinding("NOT_DECLARED")).rejects.toThrow("Local D1 binding is unavailable");

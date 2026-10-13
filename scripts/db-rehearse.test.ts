@@ -20,7 +20,7 @@ test("synthetic all-table rehearsal validates imported native consumers and pres
   const destination = join(parent, "evidence");
   try {
     const report = await main(["--local", "--destination", destination]);
-    const baselineRows = { catalog_refresh_failures: 1, catalog_refresh_state: 1, deal_refresh_state: 2, game_deal_cache: 1001, games: 500, itad_game_map: 501, sync_state: 3 };
+    const baselineRows = { __drizzle_migrations: 0, catalog_refresh_failures: 1, catalog_refresh_state: 1, deal_refresh_state: 2, game_deal_cache: 1001, games: 500, itad_game_map: 501, sync_state: 3 };
     expect(report).toMatchObject({
       scope: "isolated-local", schemaStatus: "provisional-source-schema",
       baseline: { status: "validated", tableRows: baselineRows, highWater: 900 },

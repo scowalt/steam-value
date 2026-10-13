@@ -36,12 +36,12 @@ test("the explicit local operator command applies the same immutable history rep
   const initial = JSON.parse(first.stdout);
   expect(initial).toMatchObject({
     scope: "isolated-local", schemaStatus: "provisional-source-schema",
-    applied: ["0001_complete_schema.sql"], alreadyApplied: [],
+    applied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"], alreadyApplied: [],
     schemaFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
   });
   const repeated = await runMigration(args);
   expect(repeated.exitCode).toBe(0);
   expect(JSON.parse(repeated.stdout)).toEqual({
-    ...initial, applied: [], alreadyApplied: ["0001_complete_schema.sql"],
+    ...initial, applied: [], alreadyApplied: ["0001_complete_schema.sql", "0002_retain_legacy_metadata.sql"],
   });
 });

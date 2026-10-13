@@ -72,11 +72,11 @@ test("source inventory identifies every reviewed schema object and separates onl
   const source = createD1TransferSource(await isolatedD1(), { id: "synthetic-source", freezeRecord: freeze() });
   const inventory = await inventorySource(source);
   expect(inventory.schema.tables.map((table) => table.name)).toEqual([
-    "catalog_refresh_failures", "catalog_refresh_state", "deal_refresh_state", "game_deal_cache", "games", "itad_game_map", "sync_state",
+    "__drizzle_migrations", "catalog_refresh_failures", "catalog_refresh_state", "deal_refresh_state", "game_deal_cache", "games", "itad_game_map", "sync_state",
   ]);
   expect(inventory.schema.objects.filter((object) => object.type === "index").map((object) => object.name)).toEqual([
-    "games_steam_app_id_unique", "idx_games_browse_default", "idx_games_browse_owned_playtime", "idx_games_steam_app_id",
-    "sqlite_autoindex_catalog_refresh_state_1", "sqlite_autoindex_deal_refresh_state_1", "sqlite_autoindex_game_deal_cache_1", "sqlite_autoindex_sync_state_1",
+    "games_steam_app_id_unique", "idx_games_browse_default", "idx_games_browse_owned_playtime", "idx_games_status_filters", "idx_games_steam_app_id", "idx_games_value_score",
+    "sqlite_autoindex___drizzle_migrations_1", "sqlite_autoindex_catalog_refresh_state_1", "sqlite_autoindex_deal_refresh_state_1", "sqlite_autoindex_game_deal_cache_1", "sqlite_autoindex_sync_state_1",
   ]);
   expect(inventory.schema.tables.find((table) => table.name === "games")?.columns).toHaveLength(31);
   expect(inventory.schema.tables.find((table) => table.name === "sync_state")?.columns.at(-1)).toMatchObject({
@@ -123,7 +123,7 @@ test("frozen export preserves typed all-table contents, nullable keys, orphan ro
   const destination = await artifactPath();
   const snapshot = await exportSnapshot(source, destination, freeze());
   expect(snapshot.manifest.tables.map((table) => [table.name, table.rowCount])).toEqual([
-    ["catalog_refresh_failures", 1], ["catalog_refresh_state", 1], ["deal_refresh_state", 2], ["game_deal_cache", 2], ["games", 2], ["itad_game_map", 2], ["sync_state", 3],
+    ["__drizzle_migrations", 0], ["catalog_refresh_failures", 1], ["catalog_refresh_state", 1], ["deal_refresh_state", 2], ["game_deal_cache", 2], ["games", 2], ["itad_game_map", 2], ["sync_state", 3],
   ]);
   expect(snapshot.manifest.sequence).toEqual([{ name: "games", seq: 900 }]);
   expect(snapshot.manifest.freezeRecord).toEqual(freeze());
@@ -200,7 +200,7 @@ test("full validation requires representative native Worker/client behavior and 
   });
   try {
     if (!target) throw new Error("Missing explicit transfer target");
-    expect(await validateSnapshot(target, snapshot)).toMatchObject({ status: "validated", tableCount: 7, behaviorChecks: ["viewer", "steam-status", "catalog-facts", "offers"] });
+    expect(await validateSnapshot(target, snapshot)).toMatchObject({ status: "validated", tableCount: 8, behaviorChecks: ["viewer", "steam-status", "catalog-facts", "offers"] });
     expect(JSON.parse(await Bun.file(receiptPath).text())).toMatchObject({ status: "validated" });
     const client = createHttpClient(harness.clientConfig);
     await client.execute("UPDATE games SET name = 'Same count, different contents' WHERE id = 7");
@@ -379,7 +379,7 @@ test("a lost native import reply leaves an incomplete unknown-outcome receipt an
   expect(JSON.parse(receiptText)).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: "partial-or-unknown", confirmedRows: { catalog_refresh_failures: 0 } });
   const partial = await inventorySource(target);
   expect(partial.tables.map((table) => [table.name, table.rowCount])).toEqual([
-    ["catalog_refresh_failures",1],["catalog_refresh_state",0],["deal_refresh_state",0],["game_deal_cache",0],["games",0],["itad_game_map",0],["sync_state",0],
+    ["__drizzle_migrations",0],["catalog_refresh_failures",1],["catalog_refresh_state",0],["deal_refresh_state",0],["game_deal_cache",0],["games",0],["itad_game_map",0],["sync_state",0],
   ]);
   await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
   const restartOnPartial = createD1TransferTarget(binding, { id: "lost-reply", intent: "staging", freezeRecord: freeze("lost-reply"), receiptPath: await artifactPath("restart-partial.json") });

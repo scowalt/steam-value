@@ -40,8 +40,8 @@ const metadataCreateSql = `CREATE TABLE ${metadataTable} (
 )`;
 const schemaJsonQuery = `SELECT json_group_array(json_object('type', type, 'name', name, 'table', tbl_name, 'sql', sql)) AS schema_json
   FROM (SELECT type, name, tbl_name, sql FROM sqlite_schema
-    WHERE tbl_name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*'
-      AND tbl_name NOT IN ('${metadataTable}', 'd1_migrations')
+    WHERE name <> '_cf_METADATA'
+      AND tbl_name NOT IN ('${metadataTable}', 'sqlite_sequence')
     ORDER BY type, name)`;
 
 export async function applyMigrations(binding: D1Database, migrations: readonly DbMigration[]): Promise<MigrationReport> {
@@ -57,7 +57,31 @@ export async function applyMigrations(binding: D1Database, migrations: readonly 
       throw new MigrationError("INVALID_MIGRATION", "Migration SQL must contain a statement", migration.id);
     }
   }
-  const metadataSql = await binding.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").bind(metadataTable).first<string>("sql");
+  const readSchemaText = async () => {
+    try {
+      const value = await binding.prepare(schemaJsonQuery).first<unknown>("schema_json");
+      if (typeof value !== "string") throw new Error("Incompatible metadata value");
+      return value;
+    } catch {
+      throw new MigrationError("SCHEMA_DRIFT", "Schema inventory is unavailable or incompatible; stop for reviewed inspection");
+    }
+  };
+  let metadata: { type: string; name: string; tbl_name: string; sql: string }[];
+  try {
+    metadata = (await binding.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name IN ('_cf_METADATA','sqlite_sequence',?) ORDER BY name").bind(metadataTable).all<{ type: string; name: string; tbl_name: string; sql: string }>()).results;
+    if (metadata.some((object) => object.type !== "table" || object.tbl_name !== object.name || typeof object.sql !== "string")) throw new Error("Incompatible metadata object");
+  } catch {
+    throw new MigrationError("SCHEMA_DRIFT", "Schema inventory is unavailable or incompatible; stop for reviewed inspection");
+  }
+  const internalSql = metadata.find((object) => object.name === "_cf_METADATA")?.sql ?? null;
+  if (internalSql !== null && await migrationChecksum(internalSql) !== "f197d62ec9699924d941575fe9a9fbb42ef9fde5416b7693f51ebe970c5ff160") {
+    throw new MigrationError("SCHEMA_DRIFT", "Native D1 metadata has an incompatible schema");
+  }
+  const sequenceSql = metadata.find((object) => object.name === "sqlite_sequence")?.sql ?? null;
+  if (sequenceSql !== null && sequenceSql !== "CREATE TABLE sqlite_sequence(name,seq)") {
+    throw new MigrationError("SCHEMA_DRIFT", "Sequence metadata has an incompatible schema");
+  }
+  const metadataSql = metadata.find((object) => object.name === metadataTable)?.sql ?? null;
   const hasMetadata = metadataSql !== null;
   if (hasMetadata && metadataSql !== metadataCreateSql) {
     throw new MigrationError("SCHEMA_DRIFT", "Migration metadata has an incompatible schema");
@@ -70,7 +94,7 @@ export async function applyMigrations(binding: D1Database, migrations: readonly 
   } catch {
     throw new MigrationError("SCHEMA_DRIFT", "Migration metadata has an incompatible schema");
   }
-  const currentSchema = await binding.prepare(schemaJsonQuery).first<string>("schema_json");
+  const currentSchema = await readSchemaText();
   if (currentSchema !== (history.at(-1)?.schema_json ?? "[]")) {
     throw new MigrationError("SCHEMA_DRIFT", "Database schema does not match the explicit migration history; authorized drift inventory is required");
   }
@@ -96,7 +120,7 @@ export async function applyMigrations(binding: D1Database, migrations: readonly 
     }
     report.applied.push(migration.id);
   }
-  const schemaJson = await binding.prepare(schemaJsonQuery).first<string>("schema_json");
+  const schemaJson = await readSchemaText();
   report.schemaFingerprint = await migrationChecksum(schemaJson ?? "[]");
   return report;
 }
