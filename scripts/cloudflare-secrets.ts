@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 
 const SECRET_KEYS = [
-  "TURSO_DATABASE_URL",
-  "TURSO_AUTH_TOKEN",
+  "STEAM_VALUE_DB_TOKEN",
 ];
 
 const mode = process.argv[2];
