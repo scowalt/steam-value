@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { main } from "./refresh-steam-catalog";
+export { main };
 
 if (import.meta.main) {
   main().catch((error) => {

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { createClient, type Client } from "@libsql/client";
+import { DB_LIMITS, DbError, toDbError, type DbClient, type DbStatement } from "../src/db/access";
+import { createExternalClient } from "../src/db/http";
 
 const STATE_KEY = "steam_official_catalog";
 const DEFAULT_MIN_REVIEWS = 10;
@@ -11,6 +12,7 @@ const DEFAULT_RETRY_DELAY_MS = 5000;
 const DEFAULT_REVIEW_TIMEOUT_MS = 20_000;
 const DEFAULT_BATCH_SIZE = 200;
 const DEFAULT_CHECKPOINT_EVERY = 50;
+const CATALOG_READ_PAGE_SIZE = 1000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -54,6 +56,27 @@ interface SteamReviewSummary {
   totalPositive: number;
   totalNegative: number;
   totalReviews: number;
+}
+
+export interface SteamCatalogProvider {
+  fetchAppList(options: RefreshOptions, startAfterAppId: number): Promise<SteamAppListEntry[]>;
+  fetchReviewSummary(app: SteamAppListEntry, options: RefreshOptions): Promise<SteamReviewSummary>;
+}
+
+export interface RefreshDependencies {
+  client: DbClient;
+  provider: SteamCatalogProvider;
+}
+
+type SteamFetch = (url: URL, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<Response>;
+
+class SteamProviderError extends Error {}
+
+export function createSteamCatalogProvider(apiKey: string, send: SteamFetch = (url, init) => fetch(url, init)): SteamCatalogProvider {
+  return {
+    fetchAppList: (options, startAfterAppId) => fetchSteamAppList(apiKey, options, startAfterAppId, send),
+    fetchReviewSummary: (app, options) => fetchReviewSummary(app, options, send),
+  };
 }
 
 interface RunCounters {
@@ -108,6 +131,9 @@ export function parseArgs(argv = process.argv.slice(2)): RefreshOptions {
         break;
       case "--batch-size":
         options.batchSize = parsePositiveInt(readValue(argv, ++i, arg), arg);
+        if (options.batchSize > DB_LIMITS.maxStatements) {
+          throw new Error(`--batch-size must be at most ${DB_LIMITS.maxStatements}`);
+        }
         break;
       case "--checkpoint-every":
         options.checkpointEvery = parsePositiveInt(readValue(argv, ++i, arg), arg);
@@ -146,8 +172,8 @@ function readValue(argv: string[], index: number, flag: string): string {
 
 function parseNonNegativeInt(value: string, flag: string): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${flag} must be a non-negative integer`);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${flag} must be a non-negative safe integer`);
   }
   return parsed;
 }
@@ -176,44 +202,13 @@ Options:
   --retries N              Retry count for transient Steam failures (default: ${DEFAULT_RETRIES})
   --retry-delay-ms N       Base retry delay (default: ${DEFAULT_RETRY_DELAY_MS})
   --review-timeout-ms N    Per-review request timeout (default: ${DEFAULT_REVIEW_TIMEOUT_MS})
-  --batch-size N           Turso write batch size (default: ${DEFAULT_BATCH_SIZE})
+  --batch-size N           Atomic D1 write batch size, at most ${DB_LIMITS.maxStatements} (default: ${DEFAULT_BATCH_SIZE})
   --checkpoint-every N     Processed apps between checkpoints (default: ${DEFAULT_CHECKPOINT_EVERY})
   -h, --help               Show this help
 `);
 }
 
-async function ensureCatalogRefreshTables(client: Client): Promise<void> {
-  await client.batch(
-    [
-      `CREATE TABLE IF NOT EXISTS catalog_refresh_state (
-        key TEXT PRIMARY KEY,
-        last_app_id INTEGER NOT NULL DEFAULT 0,
-        started_at INTEGER,
-        completed_at INTEGER,
-        min_reviews INTEGER NOT NULL DEFAULT 0,
-        apps_seen INTEGER NOT NULL DEFAULT 0,
-        processed_count INTEGER NOT NULL DEFAULT 0,
-        inserted_count INTEGER NOT NULL DEFAULT 0,
-        updated_count INTEGER NOT NULL DEFAULT 0,
-        skipped_count INTEGER NOT NULL DEFAULT 0,
-        unchanged_count INTEGER NOT NULL DEFAULT 0,
-        failed_count INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT,
-        updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-      )`,
-      `CREATE TABLE IF NOT EXISTS catalog_refresh_failures (
-        steam_app_id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        error TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        last_attempt_at INTEGER NOT NULL DEFAULT (unixepoch())
-      )`,
-    ],
-    "write"
-  );
-}
-
-async function resolveStartAfterAppId(client: Client, options: RefreshOptions): Promise<number> {
+async function resolveStartAfterAppId(client: DbClient, options: RefreshOptions): Promise<number> {
   if (options.dryRun || options.restart) return options.startAfterAppId ?? 0;
   if (options.startAfterAppId !== undefined) return options.startAfterAppId;
 
@@ -228,7 +223,7 @@ async function resolveStartAfterAppId(client: Client, options: RefreshOptions): 
   return Number(row.last_app_id ?? 0);
 }
 
-async function initializeState(client: Client, options: RefreshOptions, startAfterAppId: number): Promise<void> {
+async function initializeState(client: DbClient, options: RefreshOptions, startAfterAppId: number): Promise<void> {
   if (options.dryRun) return;
 
   const now = unixNow();
@@ -285,7 +280,8 @@ async function initializeState(client: Client, options: RefreshOptions, startAft
 async function fetchSteamAppList(
   apiKey: string,
   options: RefreshOptions,
-  startAfterAppId: number
+  startAfterAppId: number,
+  send: SteamFetch
 ): Promise<SteamAppListEntry[]> {
   const apps: SteamAppListEntry[] = [];
   let lastAppId = startAfterAppId;
@@ -303,7 +299,7 @@ async function fetchSteamAppList(
         have_more_results?: boolean;
         last_appid?: number;
       };
-    }>(url, options, "Steam app list");
+    }>(url, options, "Steam app list", send);
 
     const entries = (page.response?.apps ?? []).filter(isSteamAppListEntry);
     apps.push(...entries);
@@ -328,7 +324,7 @@ function isSteamAppListEntry(value: unknown): value is SteamAppListEntry {
   return typeof entry.appid === "number" && typeof entry.name === "string" && entry.name.trim().length > 0;
 }
 
-async function fetchReviewSummary(app: SteamAppListEntry, options: RefreshOptions): Promise<SteamReviewSummary> {
+async function fetchReviewSummary(app: SteamAppListEntry, options: RefreshOptions, send: SteamFetch): Promise<SteamReviewSummary> {
   const url = new URL(`https://store.steampowered.com/appreviews/${app.appid}`);
   url.searchParams.set("json", "1");
   url.searchParams.set("filter", "summary");
@@ -343,7 +339,7 @@ async function fetchReviewSummary(app: SteamAppListEntry, options: RefreshOption
       total_negative?: number;
       total_reviews?: number;
     };
-  }>(url, options, `Steam reviews for ${app.appid}`);
+  }>(url, options, `Steam reviews for ${app.appid}`, send);
 
   if (data.success !== 1 && data.success !== true) {
     return { totalPositive: 0, totalNegative: 0, totalReviews: 0 };
@@ -359,59 +355,64 @@ async function fetchReviewSummary(app: SteamAppListEntry, options: RefreshOption
 async function fetchJsonWithRetries<T>(
   url: URL,
   options: RefreshOptions,
-  label: string
+  label: string,
+  send: SteamFetch
 ): Promise<T> {
-  let lastError: unknown;
+  let message = "request failed";
 
   for (let attempt = 0; attempt <= options.retries; attempt++) {
     try {
-      const response = await fetch(url, {
+      const response = await send(url, {
         headers: { "User-Agent": "steam-value catalog refresh" },
         signal: AbortSignal.timeout(options.reviewTimeoutMs),
       });
       const text = await response.text();
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${text.slice(0, 160)}`);
+        throw new SteamProviderError(`HTTP ${response.status}`);
       }
 
       try {
         return JSON.parse(text) as T;
       } catch {
-        throw new Error(`non-JSON response: ${text.slice(0, 160)}`);
+        throw new SteamProviderError("non-JSON response");
       }
     } catch (error) {
-      lastError = error;
+      message = error instanceof SteamProviderError ? error.message : "request failed";
       if (attempt === options.retries) break;
 
       const delayMs = options.retryDelayMs * (attempt + 1);
-      const message = error instanceof Error ? error.message : String(error);
       console.warn(`    ${label} attempt ${attempt + 1} failed: ${message}`);
       console.warn(`    Retrying in ${delayMs}ms...`);
       await sleep(delayMs);
     }
   }
 
-  const message = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`${label} failed after ${options.retries + 1} attempts: ${message}`);
+  throw new SteamProviderError(`${label} failed after ${options.retries + 1} attempts: ${message}`);
 }
 
-async function loadExistingRows(client: Client): Promise<Map<number, ExistingCatalogRow>> {
-  const result = await client.execute(
-    "SELECT steam_app_id, name, steam_review_score, steam_review_count FROM games"
-  );
-
+async function loadExistingRows(client: DbClient): Promise<Map<number, ExistingCatalogRow>> {
   const rows = new Map<number, ExistingCatalogRow>();
-  for (const row of result.rows) {
-    rows.set(Number(row.steam_app_id), {
-      steamAppId: Number(row.steam_app_id),
-      name: String(row.name),
-      steamReviewScore: row.steam_review_score === null ? null : Number(row.steam_review_score),
-      steamReviewCount: Number(row.steam_review_count ?? 0),
+  let afterAppId: number | undefined;
+  while (true) {
+    const result = await client.execute({
+      sql: `SELECT steam_app_id, name, steam_review_score, steam_review_count FROM games
+        ${afterAppId === undefined ? "" : "WHERE steam_app_id > ?"}
+        ORDER BY steam_app_id LIMIT ?`,
+      args: afterAppId === undefined ? [CATALOG_READ_PAGE_SIZE] : [afterAppId, CATALOG_READ_PAGE_SIZE],
     });
+    for (const row of result.rows) {
+      const steamAppId = Number(row.steam_app_id);
+      rows.set(steamAppId, {
+        steamAppId,
+        name: String(row.name),
+        steamReviewScore: row.steam_review_score === null ? null : Number(row.steam_review_score),
+        steamReviewCount: Number(row.steam_review_count ?? 0),
+      });
+      afterAppId = steamAppId;
+    }
+    if (result.rows.length < CATALOG_READ_PAGE_SIZE) return rows;
   }
-
-  return rows;
 }
 
 export function toCatalogRow(app: SteamAppListEntry, summary: SteamReviewSummary): CatalogRow {
@@ -447,7 +448,7 @@ export function planCatalogChange(
   return "unchanged";
 }
 
-function upsertStatement(change: CatalogChange) {
+function upsertStatement(change: CatalogChange): DbStatement {
   return {
     sql: `INSERT INTO games (
         steam_app_id,
@@ -471,13 +472,13 @@ function upsertStatement(change: CatalogChange) {
   };
 }
 
-async function flushChanges(client: Client, changes: CatalogChange[], dryRun: boolean): Promise<void> {
+async function flushChanges(client: DbClient, changes: CatalogChange[], dryRun: boolean): Promise<void> {
   if (dryRun || changes.length === 0) return;
   await client.batch(changes.map(upsertStatement), "write");
 }
 
 async function checkpoint(
-  client: Client,
+  client: DbClient,
   appId: number,
   appsSeen: number,
   counters: RunCounters,
@@ -512,7 +513,7 @@ async function checkpoint(
   });
 }
 
-async function loadStateCounters(client: Client, dryRun: boolean): Promise<RunCounters> {
+async function loadStateCounters(client: DbClient, dryRun: boolean): Promise<RunCounters> {
   const zero: RunCounters = {
     processed: 0,
     inserted: 0,
@@ -551,13 +552,14 @@ async function loadStateCounters(client: Client, dryRun: boolean): Promise<RunCo
   };
 }
 
-async function markCompleted(client: Client, lastAppId: number, counters: RunCounters, dryRun: boolean): Promise<void> {
+async function markCompleted(client: DbClient, lastAppId: number, appsSeen: number, counters: RunCounters, dryRun: boolean): Promise<void> {
   if (dryRun) return;
 
   await client.execute({
     sql: `UPDATE catalog_refresh_state SET
       last_app_id = ?,
       completed_at = unixepoch(),
+      apps_seen = ?,
       processed_count = ?,
       inserted_count = ?,
       updated_count = ?,
@@ -569,6 +571,7 @@ async function markCompleted(client: Client, lastAppId: number, counters: RunCou
     WHERE key = ?`,
     args: [
       lastAppId,
+      appsSeen,
       counters.processed,
       counters.inserted,
       counters.updated,
@@ -580,7 +583,7 @@ async function markCompleted(client: Client, lastAppId: number, counters: RunCou
   });
 }
 
-async function recordFailure(client: Client, app: SteamAppListEntry, error: string, dryRun: boolean): Promise<void> {
+async function recordFailure(client: DbClient, app: SteamAppListEntry, error: string, dryRun: boolean): Promise<void> {
   if (dryRun) return;
 
   await client.execute({
@@ -599,20 +602,34 @@ function unixNow(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const options = parseArgs(argv);
+function officialSteamProvider(): SteamCatalogProvider {
   const apiKey = process.env.STEAM_API_KEY;
   if (!apiKey) throw new Error("Missing STEAM_API_KEY");
+  return createSteamCatalogProvider(apiKey);
+}
 
-  const client = createClient({
-    url: process.env.TURSO_DATABASE_URL!,
-    authToken: process.env.TURSO_AUTH_TOKEN,
-  });
-
-  if (!options.dryRun) {
-    await ensureCatalogRefreshTables(client);
+export async function main(argv = process.argv.slice(2), dependencies?: RefreshDependencies): Promise<void> {
+  const options = parseArgs(argv);
+  const provider = dependencies?.provider ?? officialSteamProvider();
+  const client = dependencies?.client ?? createExternalClient(process.env);
+  try {
+    await refreshCatalog(client, provider, options);
+  } catch (error) {
+    const safe = error instanceof SteamProviderError ? error : toDbError(error);
+    const knownFailure = safe instanceof SteamProviderError || (safe instanceof DbError && (safe.outcome === "not-applied" || safe.outcome === "rolled-back"));
+    if (!options.dryRun && knownFailure) {
+      await client.execute({
+        sql: "UPDATE catalog_refresh_state SET last_error = ?, updated_at = unixepoch() WHERE key = ?",
+        args: [safe.message, STATE_KEY],
+      });
+    }
+    throw safe;
+  } finally {
+    client.close();
   }
+}
 
+async function refreshCatalog(client: DbClient, provider: SteamCatalogProvider, options: RefreshOptions): Promise<void> {
   const startAfterAppId = await resolveStartAfterAppId(client, options);
   await initializeState(client, options, startAfterAppId);
 
@@ -623,7 +640,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (options.limitApps) console.log(`  Limit apps: ${options.limitApps}`);
 
   const [apps, existingRows] = await Promise.all([
-    fetchSteamAppList(apiKey, options, startAfterAppId),
+    provider.fetchAppList(options, startAfterAppId),
     loadExistingRows(client),
   ]);
 
@@ -636,7 +653,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   for (const app of apps) {
     try {
-      const summary = await fetchReviewSummary(app, options);
+      const summary = await provider.fetchReviewSummary(app, options);
       const row = toCatalogRow(app, summary);
       const planned = planCatalogChange(row, existingRows.get(row.steamAppId), options.minReviews);
 
@@ -674,7 +691,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   await flushChanges(client, pendingChanges, options.dryRun);
-  await markCompleted(client, lastProcessedAppId, counters, options.dryRun);
+  await markCompleted(client, lastProcessedAppId, totalAppsForState, counters, options.dryRun);
 
   console.log("\nDone!");
   console.log(`  Processed: ${counters.processed}`);
