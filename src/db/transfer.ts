@@ -506,15 +506,18 @@ export interface TransferTarget extends TransferSource {
   readonly binding: D1Database;
   readonly intent: "empty" | "staging";
   readonly receiptPath: string;
+  readonly receiptPublisher: ImportReceiptPublisher;
   readonly signal?: AbortSignal;
   readonly verifyBehavior?: () => Promise<{ passed: string[] }>;
 }
 
 export function createD1TransferTarget(binding: D1Database, options: SourceOptions & {
   intent: TransferTarget["intent"]; receiptPath: string; signal?: AbortSignal; scope?: TransferSource["scope"];
-  verifyBehavior?: TransferTarget["verifyBehavior"];
+  verifyBehavior?: TransferTarget["verifyBehavior"]; receiptPublisher?: ImportReceiptPublisher;
 }): TransferTarget {
-  return { ...options, ...createD1TransferSource(binding, options), binding };
+  return { ...options, ...createD1TransferSource(binding, options), binding,
+    receiptPublisher: options.receiptPublisher ?? createProtectedImportReceiptPublisher(options.receiptPath),
+  };
 }
 
 export interface ImportReceipt {
@@ -529,6 +532,14 @@ export interface ImportReceipt {
   writeOutcome: "not-started" | "partial-or-unknown" | "imported";
   errorCode?: string;
   validation?: { status: "incomplete" | "failed" | "passed"; errorCode?: string; behaviorChecks?: string[] };
+}
+
+export interface ImportReceiptPublisher {
+  publish(receipt: ImportReceipt, create: boolean): Promise<void>;
+}
+
+export function createProtectedImportReceiptPublisher(receiptPath: string): ImportReceiptPublisher {
+  return { publish: (receipt, create) => writeJson(receiptPath, receipt, create) };
 }
 
 async function openSnapshot(input: Snapshot | string): Promise<Snapshot> {
@@ -620,8 +631,14 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     version: 1, kind: "import", targetId: target.id, snapshotId: null, manifestDigest: null,
     status: "incomplete", phase: "preflight", confirmedRows: {}, writeOutcome: "not-started",
   };
-  await writeJson(target.receiptPath, receipt, true);
-  const save = () => writeJson(target.receiptPath, receipt);
+  const publish = async (value: ImportReceipt, create = false) => {
+    const expected = JSON.stringify(value);
+    if (create && await lstat(target.receiptPath).catch(() => undefined)) throw new TransferError("ARTIFACT_UNSAFE");
+    await target.receiptPublisher.publish(value, create);
+    if (JSON.stringify(await readJson(target.receiptPath)) !== expected) throw new TransferError("ARTIFACT_INVALID");
+  };
+  await publish(receipt, true);
+  const save = () => publish(receipt);
   try {
     if (!["empty", "staging"].includes(target.intent)) throw new TransferError("TARGET_NOT_EMPTY");
     const snapshot = await verifyArtifact(input);
@@ -698,7 +715,7 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     if (!same(imported.tables, snapshot.manifest.tables) || !same(imported.sequence, snapshot.manifest.sequence)) throw new TransferError("CONTENT_MISMATCH");
     const complete: ImportReceipt = { ...receipt, status: "imported", phase: "complete", writeOutcome: "imported" };
-    await writeJson(target.receiptPath, complete);
+    await publish(complete);
     if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     return complete;
   } catch (error) {

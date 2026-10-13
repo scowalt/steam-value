@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { createLocalD1, type LocalD1Owner } from "./local-d1";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
-import { createD1TransferSource, createD1TransferTarget, exportSnapshot, importSnapshot, inventorySource, prepareRollback, validateSnapshot, type FreezeRecord, type TransferTarget } from "./transfer";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { readFileSync, watch } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { createD1TransferSource, createD1TransferTarget, createProtectedImportReceiptPublisher, exportSnapshot, importSnapshot, inventorySource, prepareRollback, validateSnapshot, type FreezeRecord, type ImportReceipt, type TransferTarget } from "./transfer";
+import { chmod, link, lstat, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createD1WorkerTestHarness, type D1WorkerTestHarness } from "./testing";
 import { createHttpClient } from "./http";
@@ -580,21 +580,210 @@ test.each([false, true])("cancellation at actual complete-receipt publication re
   const source = createD1TransferSource(sourceBinding, { id: "publication-source", freezeRecord: freeze("publication-source") });
   const snapshot = await exportSnapshot(source, await artifactPath("publication"), source.freezeRecord);
   const controller = new AbortController();
-  const target = createD1TransferTarget(await preparedBinding(), { id: "publication-target", intent: "empty", freezeRecord: freeze("publication-target"), receiptPath: await artifactPath("publication.json"), signal: controller.signal });
-  const publication = watch(dirname(target.receiptPath), { persistent: false }, (event, filename) => {
-    if (event !== "rename" || filename !== basename(target.receiptPath)) return;
-    try {
-      const receipt = JSON.parse(readFileSync(target.receiptPath, "utf8"));
-      if (receipt.status === "imported" && receipt.phase === "complete") controller.abort();
-    } catch {}
+  const receiptPath = await artifactPath("publication.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  const target = createD1TransferTarget(await preparedBinding(), { id: "publication-target", intent: "empty", freezeRecord: freeze("publication-target"), receiptPath, signal: controller.signal,
+    receiptPublisher: { async publish(receipt, create) {
+      await publisher.publish(receipt, create);
+      if (receipt.status === "imported" && receipt.phase === "complete") {
+        expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+        controller.abort();
+      }
+    } },
   });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(controller.signal.aborted).toBe(true);
+  expect(await Bun.file(target.receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "INCOMPLETE_IMPORT" });
+  expect((await inventorySource(target)).sequence).toEqual(hasSequence ? [{ name: "games", seq: 950 }] : []);
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test.each([false, true])("import awaits durable publication acknowledgement and refuses cancellation before that acknowledgement, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "ack-source", freezeRecord: freeze("ack-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("ack"), source.freezeRecord);
+  const controller = new AbortController();
+  const receiptPath = await artifactPath("ack.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  let acknowledge!: () => void;
+  const acknowledgement = new Promise<void>((resolve) => { acknowledge = resolve; });
+  let published!: () => void;
+  const publication = new Promise<void>((resolve) => { published = resolve; });
+  const target = createD1TransferTarget(await preparedBinding(), { id: "ack-target", intent: "empty", freezeRecord: freeze("ack-target"), receiptPath, signal: controller.signal,
+    receiptPublisher: { async publish(receipt, create) {
+      await publisher.publish(receipt, create);
+      if (receipt.status === "imported" && receipt.phase === "complete") {
+        expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+        published();
+        await acknowledgement;
+      }
+    } },
+  });
+  let settled = false;
+  const operation = importSnapshot(target, snapshot);
+  void operation.then(() => { settled = true; }, () => { settled = true; published(); });
+  await publication;
+  const settledBeforeAcknowledgement = settled;
+  controller.abort();
+  acknowledge();
+  await expect(operation).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  expect(settledBeforeAcknowledgement).toBe(false);
+  expect(controller.signal.aborted).toBe(true);
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "INCOMPLETE_IMPORT" });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test.each([false, true])("cancellation after a successful returned import is not retroactive and preserves the default protected receipt, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "late-source", freezeRecord: freeze("late-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("late"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const controller = new AbortController();
+  const target = createD1TransferTarget(binding, { id: "late-target", intent: "empty", freezeRecord: freeze("late-target"), receiptPath: await artifactPath("late.json"), signal: controller.signal });
+  const receipt = await importSnapshot(target, snapshot);
+  expect(controller.signal.aborted).toBe(false);
+  expect(receipt).toMatchObject({ targetId: "late-target", status: "imported", phase: "complete", writeOutcome: "imported" });
+  const file = await lstat(target.receiptPath);
+  expect(file.mode & 0o777).toBe(0o600);
+  expect(file.nlink).toBe(1);
+  expect((await lstat(dirname(target.receiptPath))).mode & 0o777).toBe(0o700);
+  if (process.getuid) expect(file.uid).toBe(process.getuid());
+  controller.abort();
+  expect(controller.signal.aborted).toBe(true);
+  expect(await Bun.file(target.receiptPath).json()).toEqual(receipt);
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "BEHAVIOR_REQUIRED" });
+  expect(await Bun.file(target.receiptPath).json()).toMatchObject({ status: "imported", phase: "complete", writeOutcome: "imported", validation: { status: "failed", errorCode: "BEHAVIOR_REQUIRED" } });
+  expect((await binding.prepare("INSERT INTO games (steam_app_id,name) VALUES (43,'Synthetic post-return allocation') RETURNING id").all()).results).toEqual([{ id: hasSequence ? 951 : 1 }]);
+});
+
+test.each([false, true])("a real exclusive-create publication error retains conservative failure evidence and committed native state, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "publisher-error-source", freezeRecord: freeze("publisher-error-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("publisher-error"), source.freezeRecord);
+  const binding = await preparedBinding();
+  const receiptPath = await artifactPath("publisher-error.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  const target = createD1TransferTarget(binding, { id: "publisher-error-target", intent: "empty", freezeRecord: freeze("publisher-error-target"), receiptPath,
+    receiptPublisher: { async publish(receipt, create) {
+      await publisher.publish(receipt, create);
+      if (receipt.status === "imported" && receipt.phase === "complete") {
+        expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+        await publisher.publish(receipt, true);
+      }
+    } },
+  });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "ARTIFACT_UNSAFE", confirmedRows: { games: 0, __drizzle_migrations: 0 } });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  if (hasSequence) {
+    const replay = createD1TransferTarget(binding, { id: target.id, intent: "empty", freezeRecord: target.freezeRecord, receiptPath: await artifactPath("publisher-error-replay.json") });
+    await expect(importSnapshot(replay, snapshot)).rejects.toMatchObject({ code: "TARGET_NOT_EMPTY" });
+  }
+  expect(await prepareRollback(target, snapshot, await artifactPath("publisher-error-recovery"))).toMatchObject({ status: "reconciliation-required", automaticReversion: false, sequenceChanged: false });
+});
+
+test.each([false, true])("acknowledging a stale real receipt cannot complete import or bypass public receipt identity, sequence=%s", async (hasSequence) => {
+  const sourceBinding = await preparedBinding();
+  if (hasSequence) await sourceBinding.batch([
+    sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (950,42,'Synthetic deleted allocation')"),
+    sourceBinding.prepare("DELETE FROM games"),
+  ]);
+  const source = createD1TransferSource(sourceBinding, { id: "stale-publisher-source", freezeRecord: freeze("stale-publisher-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("stale-publisher"), source.freezeRecord);
+  const receiptPath = await artifactPath("stale-publisher.json");
+  const publisher = createProtectedImportReceiptPublisher(receiptPath);
+  let previous: ImportReceipt | undefined;
+  const target = createD1TransferTarget(await preparedBinding(), { id: "stale-publisher-target", intent: "empty", freezeRecord: freeze("stale-publisher-target"), receiptPath,
+    receiptPublisher: { async publish(receipt, create) {
+      if (receipt.status === "imported" && receipt.phase === "complete" && previous) {
+        await publisher.publish(previous, false);
+      } else {
+        await publisher.publish(receipt, create);
+        previous = receipt;
+      }
+    } },
+  });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_INVALID" });
+  expect(await Bun.file(receiptPath).json()).toMatchObject({ targetId: "stale-publisher-target", snapshotId: snapshot.manifest.snapshotId, status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "ARTIFACT_INVALID" });
+  expect(await inventorySource(target)).toMatchObject({ tables: snapshot.manifest.tables, sequence: hasSequence ? [{ name: "games", seq: 950 }] : [] });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
+});
+
+test("an injected real publisher cannot replace an existing target receipt or bypass exclusive creation", async () => {
+  const binding = await preparedBinding();
+  const source = createD1TransferSource(binding, { id: "existing-publisher-source", freezeRecord: freeze("existing-publisher-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("existing-publisher"), source.freezeRecord);
+  const receiptPath = await artifactPath("existing-publisher.json");
+  const target = createD1TransferTarget(binding, { id: "existing-publisher-target", intent: "empty", freezeRecord: freeze("existing-publisher-target"), receiptPath });
+  const receipt = await importSnapshot(target, snapshot);
+  const otherPath = await artifactPath("existing-other.json");
+  const selected = createD1TransferTarget(binding, { id: target.id, intent: "empty", freezeRecord: target.freezeRecord, receiptPath,
+    receiptPublisher: createProtectedImportReceiptPublisher(otherPath),
+  });
+  await expect(importSnapshot(selected, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  expect(await Bun.file(receiptPath).json()).toEqual(receipt);
+  expect(await Bun.file(otherPath).exists()).toBe(false);
+  expect((await inventorySource(selected)).tables).toEqual(snapshot.manifest.tables);
+});
+
+test.each(["file-mode", "symlink", "hardlink", "git-directory"])("the default protected publisher and validator refuse an unsafe public receipt without replacing it, fault=%s", async (fault) => {
+  const binding = await preparedBinding();
+  const source = createD1TransferSource(binding, { id: "unsafe-publisher-source", freezeRecord: freeze("unsafe-publisher-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("unsafe-publisher"), source.freezeRecord);
+  const receiptPath = await artifactPath("unsafe-publisher.json");
+  const target = createD1TransferTarget(binding, { id: "unsafe-publisher-target", intent: "empty", freezeRecord: freeze("unsafe-publisher-target"), receiptPath });
+  const receipt = await importSnapshot(target, snapshot);
+  const before = await Bun.file(receiptPath).text();
+  const preserved = join(dirname(receiptPath), "preserved.json");
+  const git = join(dirname(receiptPath), ".git");
+  if (fault === "file-mode") await chmod(receiptPath, 0o644);
+  else if (fault === "symlink") { await rename(receiptPath, preserved); await symlink(preserved, receiptPath); }
+  else if (fault === "hardlink") await link(receiptPath, preserved);
+  else await mkdir(git, { mode: 0o700 });
   try {
-    await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
-    expect(controller.signal.aborted).toBe(true);
-    expect(await Bun.file(target.receiptPath).json()).toMatchObject({ status: "incomplete", phase: "failed", writeOutcome: hasSequence ? "partial-or-unknown" : "not-started", errorCode: "INCOMPLETE_IMPORT" });
-    expect((await inventorySource(target)).sequence).toEqual(hasSequence ? [{ name: "games", seq: 950 }] : []);
-    await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "INCOMPLETE_IMPORT" });
-  } finally { publication.close(); }
+    await expect(target.receiptPublisher.publish(receipt, false)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+    expect(await Bun.file(receiptPath).text()).toBe(before);
+    await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+    expect((await inventorySource(target)).tables).toEqual(snapshot.manifest.tables);
+  } finally {
+    if (fault === "file-mode") await chmod(receiptPath, 0o600);
+    else if (fault === "symlink") { await rm(receiptPath); await rename(preserved, receiptPath); }
+    else if (fault === "hardlink") await rm(preserved);
+    else await rm(git, { recursive: true });
+  }
+});
+
+test("a real publisher bound to another path cannot acknowledge the target receipt or authorize mutation", async () => {
+  const sourceBinding = await preparedBinding();
+  await sourceBinding.prepare("INSERT INTO games (id,steam_app_id,name) VALUES (17,42,'Synthetic protected publisher')").run();
+  const source = createD1TransferSource(sourceBinding, { id: "publisher-path-source", freezeRecord: freeze("publisher-path-source") });
+  const snapshot = await exportSnapshot(source, await artifactPath("publisher-path"), source.freezeRecord);
+  const receiptPath = await artifactPath("publisher-path.json");
+  const otherPath = await artifactPath("other-publisher-path.json");
+  const target = createD1TransferTarget(await preparedBinding(), { id: "publisher-path-target", intent: "empty", freezeRecord: freeze("publisher-path-target"), receiptPath,
+    receiptPublisher: createProtectedImportReceiptPublisher(otherPath),
+  });
+  await expect(importSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
+  expect((await inventorySource(target)).tables.every((table) => table.rowCount === 0)).toBe(true);
+  expect(await Bun.file(receiptPath).exists()).toBe(false);
+  expect(await Bun.file(otherPath).json()).toMatchObject({ targetId: "publisher-path-target", status: "incomplete", phase: "preflight", writeOutcome: "not-started" });
+  await expect(validateSnapshot(target, snapshot)).rejects.toMatchObject({ code: "ARTIFACT_UNSAFE" });
 });
 
 test("sequence-only cancellation during final native inventory preserves an acknowledged sequence without completing", async () => {
