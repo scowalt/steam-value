@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { createClient } from "@libsql/client";
+import { createExternalClient } from "../src/db/http";
 import { ItadClient } from "../src/services/itad-client";
 import { refreshGameDeals } from "../src/services/deal-refresh";
 
@@ -12,9 +12,8 @@ if (args.length) {
   limit = Number(args[1]);
 }
 const apiKey = process.env.ITAD_API_KEY;
-const url = process.env.TURSO_DATABASE_URL;
-if (!apiKey || !url) throw new Error("Missing ITAD_API_KEY or TURSO_DATABASE_URL");
-const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+if (!apiKey) throw new Error("Missing ITAD_API_KEY");
+const client = createExternalClient(process.env);
 try {
   const result = await refreshGameDeals(client, new ItadClient(apiKey), {
     limit, onProgress: (message) => console.log(`[Offers] ${message}`),

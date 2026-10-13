@@ -1,4 +1,4 @@
-import type { Client, InValue } from "@libsql/client/web";
+import type { DbClient, DbValue } from "../db/access";
 import { getGameDeals, ON_SALE_SQL, onSaleArgs, unixNow, type GameDeals } from "../services/game-deals";
 
 export interface GameDto {
@@ -77,9 +77,9 @@ export function parseGameQuery(url: URL): GameQueryParams {
   };
 }
 
-export async function listGames(client: Client, params: GameQueryParams, now = unixNow()): Promise<GameDto[]> {
+export async function listGames(client: DbClient, params: GameQueryParams, now = unixNow()): Promise<GameDto[]> {
   const conditions = ["value_score IS NOT NULL", "is_endless = 0"];
-  const args: InValue[] = [];
+  const args: DbValue[] = [];
   if (params.onSale) {
     conditions.push(ON_SALE_SQL);
     args.push(...onSaleArgs(now));
@@ -157,43 +157,53 @@ export async function listGames(client: Client, params: GameQueryParams, now = u
   return result.rows.map((row) => ({ ...mapGameRow(row), deals: deals.get(Number(row.steam_app_id))! }));
 }
 
-export async function listCityBuilderGames(client: Client): Promise<CityBuilderGameDto[]> {
-  const result = await client.execute(`
-    SELECT
-      steam_app_id,
-      name,
-      steam_review_score,
-      steam_review_count,
-      hltb_main,
-      controller_support,
-      playtime_minutes,
-      value_score,
-      tags
-    FROM games
-    WHERE tags LIKE '%City Builder%'
-      AND controller_support IN ('full', 'partial')
-      AND is_ignored = 0
-      AND (playtime_minutes IS NULL OR playtime_minutes <= 60)
-  `);
+export async function listCityBuilderGames(client: DbClient): Promise<CityBuilderGameDto[]> {
+  const games: CityBuilderGameDto[] = [];
+  const pageSize = 1000;
+  let lastId: number | undefined;
+  while (true) {
+    const result = await client.execute({
+      sql: `SELECT
+        id,
+        steam_app_id,
+        name,
+        steam_review_score,
+        steam_review_count,
+        hltb_main,
+        controller_support,
+        playtime_minutes,
+        value_score,
+        tags
+      FROM games
+      WHERE tags LIKE '%City Builder%'
+        AND controller_support IN ('full', 'partial')
+        AND is_ignored = 0
+        AND (playtime_minutes IS NULL OR playtime_minutes <= 60)
+        ${lastId === undefined ? "" : "AND id > ?"}
+      ORDER BY id LIMIT ?`,
+      args: lastId === undefined ? [pageSize] : [lastId, pageSize],
+    });
+    games.push(...result.rows.map((row) => {
+      const tagRank = getCityBuilderTagRank(row.tags);
+      const tagMultiplier = 1.0 - (tagRank - 1) * (0.75 / 19);
+      const valueScore = nullableNumber(row.value_score);
 
-  const games = result.rows.map((row) => {
-    const tagRank = getCityBuilderTagRank(row.tags);
-    const tagMultiplier = 1.0 - (tagRank - 1) * (0.75 / 19);
-    const valueScore = nullableNumber(row.value_score);
-
-    return {
-      steam_app_id: Number(row.steam_app_id),
-      name: String(row.name),
-      steam_review_score: nullableNumber(row.steam_review_score),
-      steam_review_count: nullableNumber(row.steam_review_count),
-      hltb_main: nullableNumber(row.hltb_main),
-      controller_support: row.controller_support == null ? null : String(row.controller_support),
-      playtime_minutes: nullableNumber(row.playtime_minutes),
-      value_score: valueScore,
-      tag_rank: tagRank,
-      weighted_score: valueScore == null ? null : Math.round(valueScore * tagMultiplier),
-    };
-  });
+      return {
+        steam_app_id: Number(row.steam_app_id),
+        name: String(row.name),
+        steam_review_score: nullableNumber(row.steam_review_score),
+        steam_review_count: nullableNumber(row.steam_review_count),
+        hltb_main: nullableNumber(row.hltb_main),
+        controller_support: row.controller_support == null ? null : String(row.controller_support),
+        playtime_minutes: nullableNumber(row.playtime_minutes),
+        value_score: valueScore,
+        tag_rank: tagRank,
+        weighted_score: valueScore == null ? null : Math.round(valueScore * tagMultiplier),
+      };
+    }));
+    if (result.rows.length < pageSize) break;
+    lastId = Number(result.rows.at(-1)!.id);
+  }
 
   games.sort((a, b) => {
     if (a.weighted_score == null && b.weighted_score == null) return 0;

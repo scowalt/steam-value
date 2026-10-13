@@ -1,5 +1,5 @@
-import type { Client, InValue } from "@libsql/client/web";
-import { DEAL_COUNTRY, ensureDealTables, unixNow } from "./game-deals";
+import type { DbClient, DbValue } from "../db/access";
+import { DEAL_COUNTRY, unixNow } from "./game-deals";
 import type { DealOffer } from "./deal-types";
 
 export interface DealSource {
@@ -16,9 +16,8 @@ const LEASE_SECONDS = 15 * 60;
 const MAPPING_MAX_AGE = 7 * 24 * 60 * 60;
 const BATCH_SIZE = 200;
 
-export async function refreshGameDeals(client: Client, source: DealSource, options: RefreshOptions = {}) {
+export async function refreshGameDeals(client: DbClient, source: DealSource, options: RefreshOptions = {}) {
   const now = options.now ?? unixNow;
-  await ensureDealTables(client);
   const token = crypto.randomUUID();
   const started = now();
   const acquired = await client.execute({
@@ -36,7 +35,7 @@ export async function refreshGameDeals(client: Client, source: DealSource, optio
   let unmapped = 0;
   const guard = () => ({
     sql: "EXISTS (SELECT 1 FROM deal_refresh_state WHERE country=? AND lock_token=? AND lock_expires_at>?)",
-    args: [DEAL_COUNTRY, token, now()] as InValue[],
+    args: [DEAL_COUNTRY, token, now()] satisfies DbValue[],
   });
   const renew = async () => {
     const result = await client.execute({
@@ -64,7 +63,7 @@ export async function refreshGameDeals(client: Client, source: DealSource, optio
         .map((row) => Number(row.steam_app_id));
       const mappings = lookupIds.length ? await source.lookup(lookupIds) : new Map<number, string | null>();
       await renew();
-      const mappingWrites: { sql: string; args: InValue[] }[] = [];
+      const mappingWrites: { sql: string; args: DbValue[] }[] = [];
       for (const row of batch) {
         const appId = Number(row.steam_app_id);
         if (lookupIds.includes(appId) && !mappings.has(appId)) throw new Error("Incomplete ITAD mapping batch");
@@ -88,7 +87,7 @@ export async function refreshGameDeals(client: Client, source: DealSource, optio
       const priceFetchedAt = now();
       const prices = ids.length ? await source.prices(ids, DEAL_COUNTRY) : new Map<string, DealOffer[]>();
       await renew();
-      const writes: { sql: string; args: InValue[] }[] = [];
+      const writes: { sql: string; args: DbValue[] }[] = [];
       const save = (appId: number, kind: string, fetchedAt: number, offers: DealOffer[]) => {
         const g = guard();
         writes.push({

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createClient } from "@libsql/client";
+import { createExternalClient } from "../src/db/http.ts";
 import { chromium, type Browser, type Page } from "playwright";
 import {
   syncSteamStatusFromUserData,
@@ -50,10 +50,7 @@ try {
     }
 
     const userData = await fetchSteamUserData(page);
-    const client = createClient({
-      url: requiredEnv("TURSO_DATABASE_URL"),
-      authToken: process.env.TURSO_AUTH_TOKEN,
-    });
+    const client = createExternalClient(process.env);
 
     try {
       console.log(`[Steam Status] Starting browser-backed refresh at ${new Date().toISOString()}`);
