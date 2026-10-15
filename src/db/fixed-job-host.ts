@@ -1,12 +1,11 @@
 import { join } from "node:path";
-import { lstat } from "node:fs/promises";
 import { Miniflare } from "miniflare";
 import { byteLength, DB_LIMITS, exactKeys, isRecord, isRequestId, readBoundedJson } from "./access";
 import { migrationChecksum } from "./migrations-native";
 import { loadMigrations } from "./migrations";
 import { collectReleasedD1Owners, disposeD1Runtime } from "./local-d1";
 import { artifactRows, createProtectedImportReceiptPublisher, reviewedSchema, verifyArtifact, type ImportReceipt, type ImportReceiptPublisher, type Snapshot } from "./transfer";
-import { privateDirectory, privateFile, readJson, writeJson } from "./transfer-artifacts";
+import { createGuardedImportReceiptPublication, privateDirectory, privateFile, readJson, writeJson } from "./transfer-artifacts";
 import { TransferError } from "./transfer-error";
 import { packTransferRows, TRANSFER_LIMITS } from "./transfer-native";
 import { authenticateFixedD1Capability, validateFixedD1Job, type FixedD1Group, type FixedD1Job } from "./fixed-job-worker";
@@ -146,12 +145,7 @@ export async function createLocalFixedD1JobRunner(options: LocalFixedD1JobOption
     status: "incomplete", phase: "preflight", confirmedRows: Object.fromEntries(job.tables.map((table) => [table.name, 0])), writeOutcome: "not-started",
   };
   const publisher = options.receiptPublisher ?? createProtectedImportReceiptPublisher(options.receiptPath);
-  const publish = async (value: ImportReceipt, create = false) => {
-    const expected = JSON.stringify(value);
-    if (create && await lstat(options.receiptPath).catch(() => undefined)) throw new TransferError("ARTIFACT_UNSAFE");
-    await publisher.publish(value, create);
-    if (JSON.stringify(await readJson(options.receiptPath)) !== expected) throw new TransferError("ARTIFACT_INVALID");
-  };
+  const publish = createGuardedImportReceiptPublication(options.receiptPath, publisher);
   const request = async (operation: Record<string, unknown>): Promise<Response> => {
     if (!runtime || disposed) throw new TransferError("INCOMPLETE_IMPORT");
     const body = JSON.stringify({ ...common, ...operation });
