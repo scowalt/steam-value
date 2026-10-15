@@ -1,33 +1,19 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import type { Client as LibsqlClient } from "@libsql/client";
 import { createLocalD1 } from "./local-d1";
-import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, realpath } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
+import { privateDirectory, privateFile, readJson, writeJson } from "./transfer-artifacts";
 import type { FileHandle } from "node:fs/promises";
-import { dirname, join, parse, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createD1Client } from "./d1";
-import { DB_LIMITS, exactKeys, isDbValue, isRecord, type DbValue } from "./access";
+import { DB_LIMITS, exactKeys, isRecord, type DbValue } from "./access";
+import { TransferError } from "./transfer-error";
+import { describeTables, packTransferRows, quote, readSchema, readSequence, recordRow, same, scalar, scanTables, tableSummary, TRANSFER_LIMITS } from "./transfer-native";
+export { TransferError } from "./transfer-error";
+export { TRANSFER_LIMITS } from "./transfer-native";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
 import { legacySchemaStatements, OBSERVED_LEGACY_OBJECTS_FINGERPRINT } from "./schema-profile";
-
-export class TransferError extends Error {
-  constructor(readonly code: "SCHEMA_DRIFT" | "UNSUPPORTED_DATA" | "FREEZE_REQUIRED" | "ARTIFACT_INVALID" | "ARTIFACT_UNSAFE" | "TARGET_NOT_EMPTY" | "INCOMPLETE_IMPORT" | "CONTENT_MISMATCH" | "BEHAVIOR_REQUIRED" | "TRANSFER_FAILED") {
-    super({
-      SCHEMA_DRIFT: "Unresolved schema or metadata drift; stop for reviewed inventory",
-      UNSUPPORTED_DATA: "Source data exceeds supported types or bounds; preserve it and stop",
-      FREEZE_REQUIRED: "Matching explicit writer freeze and drain evidence is required",
-      ARTIFACT_INVALID: "Snapshot is incomplete, malformed or fails integrity checks",
-      ARTIFACT_UNSAFE: "Artifacts must be private owned files outside Git without symlinks",
-      TARGET_NOT_EMPTY: "Import requires a deliberately selected pristine empty or staging target",
-      INCOMPLETE_IMPORT: "Import is incomplete or uncertain; inspect protected receipts and restart explicitly",
-      CONTENT_MISMATCH: "Full schema, typed content or sequence validation failed",
-      BEHAVIOR_REQUIRED: "Representative viewer and job verification is required before validation completes",
-      TRANSFER_FAILED: "Transfer failed; inspect protected incomplete receipts without retrying writes",
-    }[code]);
-    this.name = "TransferError";
-  }
-}
 
 export interface FreezeRecord {
   mode: "frozen-writers";
@@ -127,15 +113,6 @@ export interface SnapshotManifest extends SourceInventory {
 }
 export interface Snapshot { directory: string; manifest: SnapshotManifest }
 
-export const TRANSFER_LIMITS = Object.freeze({ pageRows: 64, maxRowBytes: 2_000_000, batchStatements: 64, maxManifestBytes: 1_000_000 });
-
-function quote(value: string): string { return `"${value.replaceAll('"', '""')}"`; }
-function same(a: unknown, b: unknown): boolean { return JSON.stringify(a) === JSON.stringify(b); }
-function safeRecord(row: Record<string, unknown>): Record<string, DbValue> {
-  if (!Object.values(row).every(isDbValue)) throw new TransferError("SCHEMA_DRIFT");
-  return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value as DbValue]));
-}
-
 function assertFreeze(source: TransferSource, record = source.freezeRecord) {
   if (typeof source.id !== "string" || !source.id || !["isolated-local", "approved-operator"].includes(source.scope) ||
     !record || record.mode !== "frozen-writers" || record.sourceId !== source.id || typeof record.recordId !== "string" || !record.recordId || typeof record.evidence !== "string" || !record.evidence ||
@@ -147,72 +124,6 @@ function assertFreeze(source: TransferSource, record = source.freezeRecord) {
     !same(record, source.freezeRecord)) throw new TransferError("FREEZE_REQUIRED");
 }
 
-async function readSchema(source: TransferSource) {
-  const raw = await source.query("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name");
-  const objects: SchemaObject[] = raw.map((row) => {
-    if (typeof row.type !== "string" || typeof row.name !== "string" || typeof row.tbl_name !== "string" || !(row.sql === null || typeof row.sql === "string")) throw new TransferError("SCHEMA_DRIFT");
-    return { type: row.type, name: row.name, tbl_name: row.tbl_name, sql: row.sql };
-  });
-  return objects;
-}
-
-const tableDescriptionSql = `SELECT table_names.value AS transfer_table,
-  (SELECT json_group_array(json_object('cid',cid,'name',name,'type',type,'notnull',\"notnull\",'dflt_value',dflt_value,'pk',pk,'hidden',hidden))
-    FROM (SELECT * FROM pragma_table_xinfo(table_names.value) ORDER BY cid)) AS columns_json,
-  (SELECT json_group_array(json_object('definition',json_object('name',name,'unique',\"unique\",'origin',origin,'partial',partial),
-    'columns',json((SELECT json_group_array(json_object('seqno',seqno,'cid',cid,'name',name,'desc',\"desc\",'coll',coll,'key',key))
-      FROM (SELECT * FROM pragma_index_xinfo(indexes.name) ORDER BY seqno)))))
-    FROM (SELECT * FROM pragma_index_list(table_names.value) ORDER BY name) AS indexes) AS indexes_json,
-  (SELECT json_group_array(json_object('id',id,'seq',seq,'table',\"table\",'from',\"from\",'to',\"to\",'on_update',on_update,'on_delete',on_delete,'match',match))
-    FROM (SELECT * FROM pragma_foreign_key_list(table_names.value) ORDER BY id,seq)) AS foreign_keys_json,
-  (SELECT json_object('type',type,'ncol',ncol,'wr',wr,'strict',strict)
-    FROM pragma_table_list WHERE schema='main' AND name=table_names.value) AS flags_json
-  FROM json_each(?) AS table_names`;
-
-function schemaJson(value: unknown): unknown {
-  if (typeof value !== "string") throw new TransferError("SCHEMA_DRIFT");
-  try { return JSON.parse(value); } catch { throw new TransferError("SCHEMA_DRIFT"); }
-}
-
-function schemaRecords(value: unknown): Record<string, DbValue>[] {
-  if (!Array.isArray(value) || !value.every(isRecord)) throw new TransferError("SCHEMA_DRIFT");
-  return value.map(safeRecord);
-}
-
-async function describeTables(source: TransferSource, objects: SchemaObject[]): Promise<SchemaTable[]> {
-  const tables: SchemaTable[] = [];
-  const selected = objects.filter((entry) => entry.type === "table");
-  const descriptions = new Map<string, Record<string, unknown>>();
-  const groupSize = 20;
-  for (let offset = 0; offset < selected.length; offset += groupSize) {
-    const group = selected.slice(offset, offset + groupSize);
-    const sql = tableDescriptionSql;
-    const args = [JSON.stringify(group.map((object) => object.name))];
-    if (Buffer.byteLength(sql) > DB_LIMITS.maxSqlBytes || Buffer.byteLength(JSON.stringify({ sql, args })) > DB_LIMITS.maxRequestBytes) throw new TransferError("SCHEMA_DRIFT");
-    const rows = await source.query(sql, args);
-    if (rows.length !== group.length) throw new TransferError("SCHEMA_DRIFT");
-    for (const row of rows) {
-      if (typeof row.transfer_table !== "string" || !group.some((object) => object.name === row.transfer_table) || descriptions.has(row.transfer_table)) throw new TransferError("SCHEMA_DRIFT");
-      descriptions.set(row.transfer_table, row);
-    }
-  }
-  for (const object of selected) {
-    const row = descriptions.get(object.name);
-    if (!row) throw new TransferError("SCHEMA_DRIFT");
-    const columns = schemaRecords(schemaJson(row.columns_json));
-    const rawIndexes = schemaJson(row.indexes_json);
-    if (!Array.isArray(rawIndexes)) throw new TransferError("SCHEMA_DRIFT");
-    const indexes = rawIndexes.map((index: unknown) => {
-      if (!isRecord(index) || !isRecord(index.definition)) throw new TransferError("SCHEMA_DRIFT");
-      return { definition: safeRecord(index.definition), columns: schemaRecords(index.columns) };
-    });
-    const flags = schemaJson(row.flags_json);
-    if (!isRecord(flags)) throw new TransferError("SCHEMA_DRIFT");
-    tables.push({ name: object.name, columns, indexes, foreignKeys: schemaRecords(schemaJson(row.foreign_keys_json)), flags: safeRecord(flags) });
-  }
-  return tables;
-}
-
 interface SchemaReview {
   schema: ReviewedSchema;
   legacySchema: ReviewedSchema;
@@ -222,7 +133,7 @@ interface SchemaReview {
 }
 
 let reviewed: Promise<SchemaReview> | undefined;
-async function reviewedSchema() {
+export async function reviewedSchema() {
   return reviewed ??= (async () => {
     const runtime = await createLocalD1({ databaseNames: ["LEGACY_PROFILE"] });
     try {
@@ -329,152 +240,6 @@ export async function inventorySource(source: TransferSource, destination?: stri
   }
 }
 
-async function readSequence(source: TransferSource) {
-  const rows = await source.query("SELECT name, seq, typeof(seq) AS storage FROM sqlite_sequence ORDER BY name");
-  if (rows.length > 1) throw new TransferError("UNSUPPORTED_DATA");
-  return rows.map((row) => {
-    if (row.name !== "games" || row.storage !== "integer" || typeof row.seq !== "number" || !Number.isSafeInteger(row.seq) || row.seq < 0) throw new TransferError("UNSUPPORTED_DATA");
-    return { name: row.name, seq: row.seq };
-  });
-}
-
-function scalar(type: unknown, value: unknown): TypedValue {
-  if (type === "null" && value === null) return ["null", null];
-  if (type === "text" && typeof value === "string" && Buffer.byteLength(value) <= DB_LIMITS.maxStringBytes) return ["text", value];
-  if ((type === "integer" || type === "real") && typeof value === "number" && Number.isFinite(value) && !Object.is(value, -0) &&
-    (type !== "integer" || Number.isSafeInteger(value)) && (!Number.isInteger(value) || Number.isSafeInteger(value))) return [type, value];
-  throw new TransferError("UNSUPPORTED_DATA");
-}
-
-function tableSummary(table: SchemaTable): TableInventory {
-  return { name: table.name, columns: table.columns.map((column) => String(column.name)), file: `${table.name}.jsonl`, rowCount: 0, contentDigest: "", bytes: 0, maxRowBytes: 0, maxScalarBytes: 0, storageTypes: table.columns.map(() => ({})) };
-}
-
-function recordRow(summary: TableInventory, row: SnapshotRow) {
-  const line = JSON.stringify(row) + "\n";
-  const bytes = Buffer.byteLength(line);
-  if (bytes > TRANSFER_LIMITS.maxRowBytes) throw new TransferError("UNSUPPORTED_DATA");
-  summary.rowCount++;
-  summary.bytes += bytes;
-  summary.maxRowBytes = Math.max(summary.maxRowBytes, bytes);
-  row.values.forEach(([type, value], index) => {
-    const types = summary.storageTypes[index]!;
-    types[type] = (types[type] ?? 0) + 1;
-    summary.maxScalarBytes = Math.max(summary.maxScalarBytes, typeof value === "string" ? Buffer.byteLength(value) : 8);
-  });
-  return line;
-}
-
-async function* sourceRows(source: TransferSource, table: SchemaTable): AsyncGenerator<SnapshotRow> {
-  const columns = table.columns.map((column) => quote(String(column.name)));
-  const sizeSql = columns.map((column) => `coalesce(length(CAST(${column} AS BLOB)),0)`).join("+");
-  const sizes = await source.query(`SELECT COUNT(*) AS count, coalesce(MAX(${sizeSql}),0) AS bytes FROM ${quote(table.name)}`);
-  const size = sizes[0];
-  if (!size || typeof size.count !== "number" || !Number.isSafeInteger(size.count) || typeof size.bytes !== "number" || size.bytes > TRANSFER_LIMITS.maxRowBytes) throw new TransferError("UNSUPPORTED_DATA");
-  const pageSize = Math.max(1, Math.min(TRANSFER_LIMITS.pageRows, Math.floor(DB_LIMITS.maxResponseBytes / (Math.max(1, size.bytes) * 8 + 4096))));
-  const projection = columns.flatMap((column, index) => [`${column} AS c${index}`, `typeof(${column}) AS t${index}`, `length(CAST(${column} AS BLOB)) AS b${index}`]).join(",");
-  let cursor: number | undefined;
-  let count = 0;
-  for (;;) {
-    const rows = await source.query(`SELECT rowid AS transfer_rowid,${projection} FROM ${quote(table.name)}${cursor === undefined ? "" : " WHERE rowid > ?"} ORDER BY rowid LIMIT ?`, cursor === undefined ? [pageSize] : [cursor, pageSize]);
-    if (rows.length > pageSize) throw new TransferError("UNSUPPORTED_DATA");
-    for (const raw of rows) {
-      if (typeof raw.transfer_rowid !== "number" || !Number.isSafeInteger(raw.transfer_rowid) || (cursor !== undefined && raw.transfer_rowid <= cursor)) throw new TransferError("UNSUPPORTED_DATA");
-      cursor = raw.transfer_rowid;
-      const values = columns.map((_, index) => {
-        const value = scalar(raw[`t${index}`], raw[`c${index}`]);
-        if (value[0] === "text" && Buffer.byteLength(String(value[1])) !== raw[`b${index}`]) throw new TransferError("UNSUPPORTED_DATA");
-        return value;
-      });
-      count++;
-      yield { rowid: cursor, values };
-    }
-    if (rows.length < pageSize) break;
-  }
-  if (count !== size.count) throw new TransferError("FREEZE_REQUIRED");
-}
-
-async function scanTables(source: TransferSource, schema: ReviewedSchema, onRow?: (table: string, line: string) => Promise<void>) {
-  const tables = [];
-  for (const table of schema.tables) {
-    const summary = tableSummary(table);
-    const hash = new Bun.CryptoHasher("sha256");
-    for await (const row of sourceRows(source, table)) {
-      const line = recordRow(summary, row);
-      hash.update(line);
-      await onRow?.(table.name, line);
-    }
-    summary.contentDigest = hash.digest("hex");
-    tables.push(summary);
-  }
-  return tables;
-}
-
-async function outsideGit(path: string) {
-  const absolute = resolve(path);
-  let current = parse(absolute).root;
-  for (const part of absolute.slice(current.length).split("/").filter(Boolean)) {
-    current = join(current, part);
-    const info = await lstat(current).catch(() => undefined);
-    if (info?.isSymbolicLink()) throw new TransferError("ARTIFACT_UNSAFE");
-    if (await lstat(join(current, ".git")).catch(() => undefined)) throw new TransferError("ARTIFACT_UNSAFE");
-  }
-  return absolute;
-}
-
-function owned(info: { mode: number; uid: number }, mode: number) {
-  return (info.mode & 0o777) === mode && (process.getuid === undefined || info.uid === process.getuid());
-}
-
-async function privateDirectory(path: string, create = false) {
-  try {
-    const absolute = await outsideGit(path);
-    if (create) await mkdir(absolute, { mode: 0o700 });
-    const info = await lstat(absolute);
-    if (!info.isDirectory() || !owned(info, 0o700) || await realpath(absolute) !== absolute) throw new TransferError("ARTIFACT_UNSAFE");
-    return absolute;
-  } catch { throw new TransferError("ARTIFACT_UNSAFE"); }
-}
-
-async function privateFile(path: string, create = false): Promise<FileHandle> {
-  const absolute = await outsideGit(path);
-  await privateDirectory(dirname(absolute));
-  const handle = await open(absolute, create ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW : constants.O_RDONLY | constants.O_NOFOLLOW, 0o600).catch(() => { throw new TransferError("ARTIFACT_UNSAFE"); });
-  const info = await handle.stat();
-  if (!info.isFile() || !owned(info, 0o600) || info.nlink !== 1) {
-    await handle.close();
-    throw new TransferError("ARTIFACT_UNSAFE");
-  }
-  return handle;
-}
-
-async function writeJson(path: string, value: unknown, create = false) {
-  if (!create) {
-    const existing = await privateFile(path);
-    await existing.close();
-  }
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-  const file = await privateFile(temporary, true);
-  try { await file.writeFile(JSON.stringify(value) + "\n"); await file.sync(); }
-  finally { await file.close(); }
-  if (create) {
-    const destination = await privateFile(path, true);
-    await destination.close();
-  }
-  await rename(temporary, path).catch(() => { throw new TransferError("ARTIFACT_UNSAFE"); });
-  const directory = await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  try { await directory.sync(); } finally { await directory.close(); }
-}
-
-async function readJson(path: string): Promise<unknown> {
-  const file = await privateFile(path);
-  try {
-    if ((await file.stat()).size > TRANSFER_LIMITS.maxManifestBytes) throw new TransferError("ARTIFACT_INVALID");
-    return JSON.parse(await file.readFile("utf8"));
-  } catch (error) { throw error instanceof TransferError ? error : new TransferError("ARTIFACT_INVALID"); }
-  finally { await file.close(); }
-}
-
 export async function exportSnapshot(source: TransferSource, destination: string, freezeRecord: FreezeRecord): Promise<Snapshot> {
   assertFreeze(source, freezeRecord);
   const directory = await privateDirectory(destination, true);
@@ -579,7 +344,7 @@ async function openSnapshot(input: Snapshot | string): Promise<Snapshot> {
   return { directory, manifest };
 }
 
-async function* artifactRows(snapshot: Snapshot, table: SchemaTable): AsyncGenerator<SnapshotRow> {
+export async function* artifactRows(snapshot: Snapshot, table: SchemaTable): AsyncGenerator<SnapshotRow> {
   const summary = snapshot.manifest.tables.find((entry) => entry.name === table.name)!;
   const file = await privateFile(join(snapshot.directory, summary.file));
   const observed = tableSummary(table);
@@ -620,7 +385,7 @@ async function* artifactRows(snapshot: Snapshot, table: SchemaTable): AsyncGener
   finally { await file.close(); }
 }
 
-async function verifyArtifact(input: Snapshot | string) {
+export async function verifyArtifact(input: Snapshot | string) {
   const snapshot = await openSnapshot(input);
   for (const table of (await reviewedSchema()).schema.tables) for await (const _row of artifactRows(snapshot, table)) {}
   return snapshot;
@@ -652,47 +417,18 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     await save();
     for (const table of tables) {
       receipt.phase = "rows";
-      type ImportStatement = { sql: string; args: DbValue[]; rows: number };
-      let batch: ImportStatement[] = [];
-      let pending: ImportStatement | undefined;
-      let bytes = 0;
-      const prefix = `INSERT INTO ${quote(table.name)} (rowid,${table.columns.map((column) => quote(String(column.name))).join(",")}) VALUES `;
-      const statementBytes = (statement: ImportStatement) => Buffer.byteLength(JSON.stringify({ sql: statement.sql, args: statement.args }));
-      const flush = async () => {
-        if (!batch.length) return;
+      for await (const group of packTransferRows(table, artifactRows(snapshot, table))) {
         if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
         receipt.writeOutcome = "partial-or-unknown";
         await save();
-        const statements = batch.map((statement) => target.binding.prepare(statement.sql).bind(...statement.args));
+        const statements = group.statements.map((statement) => target.binding.prepare(statement.sql).bind(...statement.args));
         if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
         await target.binding.batch(statements);
-        receipt.confirmedRows[table.name]! += batch.reduce((count, statement) => count + statement.rows, 0);
+        receipt.confirmedRows[table.name]! += group.statements.reduce((count, statement) => count + statement.rows, 0);
         if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
-        batch = []; bytes = 0;
         await save();
         if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
-      };
-      const enqueue = async () => {
-        if (!pending) return;
-        const size = statementBytes(pending);
-        if (batch.length >= TRANSFER_LIMITS.batchStatements || bytes + size > DB_LIMITS.maxRequestBytes - 4096) await flush();
-        batch.push(pending); bytes += size; pending = undefined;
-      };
-      for await (const row of artifactRows(snapshot, table)) {
-        const args: DbValue[] = [row.rowid, ...row.values.map((entry) => entry[1])];
-        const binds = ["CAST(? AS INTEGER)", ...row.values.map(([type]) => type === "integer" ? "CAST(? AS INTEGER)" : type === "real" ? "CAST(? AS REAL)" : "?")];
-        const values = `(${binds.join(",")})`;
-        const single: ImportStatement = { sql: prefix + values, args, rows: 1 };
-        if (args.length > DB_LIMITS.maxParams || Buffer.byteLength(single.sql) > DB_LIMITS.maxSqlBytes || statementBytes(single) > DB_LIMITS.maxRequestBytes - 4096) throw new TransferError("UNSUPPORTED_DATA");
-        let combined = pending ? { sql: `${pending.sql},${values}`, args: [...pending.args, ...args], rows: pending.rows + 1 } : single;
-        if (combined.args.length > DB_LIMITS.maxParams || Buffer.byteLength(combined.sql) > DB_LIMITS.maxSqlBytes || statementBytes(combined) > DB_LIMITS.maxRequestBytes - 4096) {
-          await enqueue();
-          combined = single;
-        }
-        pending = combined;
       }
-      await enqueue();
-      await flush();
     }
     if (target.signal?.aborted) throw new TransferError("INCOMPLETE_IMPORT");
     receipt.phase = "sequence";
