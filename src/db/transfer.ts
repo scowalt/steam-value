@@ -1,8 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import type { Client as LibsqlClient } from "@libsql/client";
 import { createLocalD1 } from "./local-d1";
-import { lstat } from "node:fs/promises";
-import { privateDirectory, privateFile, readJson, writeJson } from "./transfer-artifacts";
+import { createGuardedImportReceiptPublication, privateDirectory, privateFile, readJson, writeJson } from "./transfer-artifacts";
 import type { FileHandle } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -396,12 +395,7 @@ export async function importSnapshot(target: TransferTarget, input: Snapshot | s
     version: 1, kind: "import", targetId: target.id, snapshotId: null, manifestDigest: null,
     status: "incomplete", phase: "preflight", confirmedRows: {}, writeOutcome: "not-started",
   };
-  const publish = async (value: ImportReceipt, create = false) => {
-    const expected = JSON.stringify(value);
-    if (create && await lstat(target.receiptPath).catch(() => undefined)) throw new TransferError("ARTIFACT_UNSAFE");
-    await target.receiptPublisher.publish(value, create);
-    if (JSON.stringify(await readJson(target.receiptPath)) !== expected) throw new TransferError("ARTIFACT_INVALID");
-  };
+  const publish = createGuardedImportReceiptPublication(target.receiptPath, target.receiptPublisher);
   await publish(receipt, true);
   const save = () => publish(receipt);
   try {

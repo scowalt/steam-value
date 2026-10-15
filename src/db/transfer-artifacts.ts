@@ -4,6 +4,7 @@ import type { FileHandle } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
 import { TransferError } from "./transfer-error";
 import { TRANSFER_LIMITS } from "./transfer-native";
+import type { ImportReceipt, ImportReceiptPublisher } from "./transfer";
 
 async function outsideGit(path: string) {
   const absolute = resolve(path);
@@ -68,6 +69,15 @@ async function readJson(path: string): Promise<unknown> {
     return JSON.parse(await file.readFile("utf8"));
   } catch (error) { throw error instanceof TransferError ? error : new TransferError("ARTIFACT_INVALID"); }
   finally { await file.close(); }
+}
+
+export function createGuardedImportReceiptPublication(receiptPath: string, publisher: ImportReceiptPublisher) {
+  return async (value: ImportReceipt, create = false) => {
+    const expected = JSON.stringify(value);
+    if (create && await lstat(receiptPath).catch(() => undefined)) throw new TransferError("ARTIFACT_UNSAFE");
+    await publisher.publish(value, create);
+    if (JSON.stringify(await readJson(receiptPath)) !== expected) throw new TransferError("ARTIFACT_INVALID");
+  };
 }
 
 export { privateDirectory, privateFile, readJson, writeJson };
