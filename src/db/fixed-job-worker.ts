@@ -1,8 +1,9 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { byteLength, DbError, DB_LIMITS, exactKeys, isJsonMediaType, isRecord, isRequestId, nativeSqlFailure, readBoundedJson, validateStatement, type DbValue } from "./access";
 import { migrationChecksum, prepareMigrationGroup, schemaJsonQuery, validateMigrationHistory, type DbMigration } from "./migrations-native";
-import { createNativeTransferReader, describeTables, packTransferRows, quote, readSchema, readSequence, readTransferPage, recordRow, scalar, scanTables, tableSummary, transferReadBounds, TRANSFER_LIMITS } from "./transfer-native";
+import { createNativeTransferReader, describeTables, packTransferRows, quote, readSchema, readSequence, readTransferPage, recordRow, scalar, tableSummary, transferReadBounds, TRANSFER_LIMITS } from "./transfer-native";
 import { TransferError } from "./transfer-error";
+import { estimateFixedD1Verification, scanFixedD1Tables } from "./fixed-job-native";
 import type { ReviewedSchema, SnapshotRow, SourceInventory } from "./transfer";
 
 export interface FixedD1Group {
@@ -63,6 +64,7 @@ export async function validateFixedD1Job(job: FixedD1Job, migrations: readonly D
     totals[group.table]! += group.rowCount;
   }
   if (job.tables.some((table) => table.rowCount !== totals[table.name])) throw new TransferError("ARTIFACT_INVALID");
+  estimateFixedD1Verification(job.tables);
 }
 
 async function fixedSchema(binding: D1Database, job: FixedD1Job): Promise<ReviewedSchema> {
@@ -196,7 +198,7 @@ export function createFixedD1JobWorker(job: FixedD1Job, migrations: readonly DbM
           for (const row of rows) recordRow(summary, row);
           return json({ ok: true, columns: ["rowid", ...table.columns.map((column) => column.name)], rows, cursor: rows.at(-1)?.rowid ?? body.cursor, complete: rows.length < bounds.pageSize });
         }
-        const tables = await scanTables(source, schema);
+        const tables = await scanFixedD1Tables(source, schema);
         const sequence = await readSequence(source);
         if (body.op === "sequence") {
           if (JSON.stringify(tables) !== JSON.stringify(job.tables)) return failure("ORDER_REFUSED", 409);

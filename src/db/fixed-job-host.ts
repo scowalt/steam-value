@@ -1,13 +1,13 @@
 import { join } from "node:path";
 import { Miniflare } from "miniflare";
-import { byteLength, DB_LIMITS, exactKeys, isRecord, isRequestId, readBoundedJson } from "./access";
+import { byteLength, DB_LIMITS, exactKeys, isRecord, isRequestId, isJsonMediaType, readBoundedJson } from "./access";
 import { migrationChecksum } from "./migrations-native";
 import { loadMigrations } from "./migrations";
 import { collectReleasedD1Owners, disposeD1Runtime } from "./local-d1";
 import { artifactRows, createProtectedImportReceiptPublisher, reviewedSchema, verifyArtifact, type ImportReceipt, type ImportReceiptPublisher, type Snapshot } from "./transfer";
 import { createGuardedImportReceiptPublication, privateDirectory, privateFile, readJson, writeJson } from "./transfer-artifacts";
 import { TransferError } from "./transfer-error";
-import { packTransferRows, TRANSFER_LIMITS } from "./transfer-native";
+import { packTransferRows, scalar, TRANSFER_LIMITS } from "./transfer-native";
 import { authenticateFixedD1Capability, validateFixedD1Job, type FixedD1Group, type FixedD1Job } from "./fixed-job-worker";
 
 export interface FixedD1JobOptions {
@@ -128,11 +128,155 @@ export interface LocalFixedD1JobOptions {
   receiptPublisher?: ImportReceiptPublisher;
 }
 
+export interface FixedD1WorkerBuildOptions {
+  jobDirectory: string;
+  reviewedJobDigest: string;
+  destination: string;
+}
+
+export async function buildFixedD1JobWorker(options: FixedD1WorkerBuildOptions) {
+  await privateDirectory(options.jobDirectory);
+  const value = await readJson(join(options.jobDirectory, "job.json"));
+  if (!/^[a-f0-9]{64}$/.test(options.reviewedJobDigest) || await migrationChecksum(JSON.stringify(value)) !== options.reviewedJobDigest) throw new TransferError("ARTIFACT_INVALID");
+  const job = value as FixedD1Job;
+  const migrations = await loadMigrations();
+  try { await validateFixedD1Job(job, migrations); }
+  catch { throw new TransferError("ARTIFACT_INVALID"); }
+  const now = Math.floor(Date.now() / 1000);
+  if (job.expiresAt <= now || job.expiresAt > now + 3600) throw new TransferError("ARTIFACT_INVALID");
+  const directory = await privateDirectory(options.destination, true);
+  const script = await buildJob(directory, job, migrations);
+  const artifact = { version: 1, jobDigest: options.reviewedJobDigest, scriptDigest: await migrationChecksum(script), scriptBytes: byteLength(script), compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], binding: "DB" };
+  await writeJson(join(directory, "artifact.json"), artifact, true);
+  return { ...artifact, directory, scriptPath: join(directory, "worker.js") };
+}
+
+export interface ApprovedFixedD1Deployment {
+  accountId: string;
+  databaseId: string;
+  workerName: string;
+  endpoint: string;
+  scriptDigest: string;
+  captureDigest: string;
+}
+
+export interface RemoteFixedD1JobOptions extends Omit<LocalFixedD1JobOptions, "persistTo"> {
+  deploymentRecordPath: string;
+  reviewedDeploymentDigest: string;
+  approvedDeployment: ApprovedFixedD1Deployment;
+  workerArtifactPath: string;
+  transport?: (request: Request) => Promise<Response>;
+}
+
+async function checkFixedD1Deployment(options: RemoteFixedD1JobOptions, job: FixedD1Job) {
+  const approved = options.approvedDeployment;
+  const fields = ["accountId", "databaseId", "workerName", "endpoint", "scriptDigest", "captureDigest"];
+  if (!isRecord(approved) || !exactKeys(approved, fields) || Object.keys(approved).length !== fields.length || !/^[a-f0-9]{32}$/.test(approved.accountId) || !isRequestId(approved.databaseId) ||
+    !/^[a-z0-9][a-z0-9-]{0,62}$/.test(approved.workerName) || ![approved.scriptDigest, approved.captureDigest, options.reviewedDeploymentDigest].every((hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash))) throw new TransferError("ARTIFACT_INVALID");
+  let url: URL;
+  try { url = new URL(approved.endpoint); } catch { throw new TransferError("ARTIFACT_INVALID"); }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.port || url.pathname !== "/job" || url.href !== approved.endpoint || !/^[a-z0-9.-]+$/i.test(url.hostname) || url.hostname === "localhost" || /^[0-9.]+$/.test(url.hostname)) throw new TransferError("ARTIFACT_INVALID");
+  const value = await readJson(options.deploymentRecordPath);
+  const now = Math.floor(Date.now() / 1000);
+  if (!isRecord(value) || !exactKeys(value, ["version", "kind", ...fields, "binding", "runId", "targetId", "intent", "expiresAt", "capabilityDigest", "jobDigest", "scriptBytes"]) || Object.keys(value).length !== 16 ||
+    await migrationChecksum(JSON.stringify(value)) !== options.reviewedDeploymentDigest || value.version !== 1 || value.kind !== "fixed-d1-deployment" ||
+    fields.some((field) => value[field] !== Reflect.get(approved, field)) || JSON.stringify(value.binding) !== JSON.stringify({ name: "DB", databaseId: approved.databaseId }) ||
+    value.runId !== job.runId || value.targetId !== job.target.id || value.intent !== job.target.intent || value.expiresAt !== job.expiresAt || job.expiresAt <= now || job.expiresAt > now + 3600 ||
+    value.capabilityDigest !== job.capabilityDigest || value.jobDigest !== options.reviewedJobDigest) throw new TransferError("ARTIFACT_INVALID");
+  const file = await privateFile(options.workerArtifactPath);
+  try {
+    const size = (await file.stat()).size;
+    if (size > DB_LIMITS.maxRequestBytes || size !== value.scriptBytes) throw new TransferError("ARTIFACT_INVALID");
+    const bytes = new Uint8Array(size + 1);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const chunk = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (!chunk.bytesRead) break;
+      offset += chunk.bytesRead;
+    }
+    if (offset !== size) throw new TransferError("ARTIFACT_INVALID");
+    const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes.subarray(0, size))), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (hash !== approved.scriptDigest) throw new TransferError("ARTIFACT_INVALID");
+  } finally { await file.close(); }
+}
+
+function checkRemoteFixedD1Page(value: Record<string, unknown>, operation: Record<string, unknown>, job: FixedD1Job) {
+  const table = job.tables.find((table) => table.name === operation.table);
+  if (!table || !exactKeys(value, ["ok", "columns", "rows", "cursor", "complete"]) || Object.keys(value).length !== 5 ||
+    JSON.stringify(value.columns) !== JSON.stringify(["rowid", ...table.columns]) || !Array.isArray(value.rows) || value.rows.length > TRANSFER_LIMITS.pageRows || typeof value.complete !== "boolean") throw new TransferError("TRANSFER_FAILED");
+  let cursor = operation.cursor;
+  for (const row of value.rows) {
+    if (!isRecord(row) || !exactKeys(row, ["rowid", "values"]) || Object.keys(row).length !== 2 || typeof row.rowid !== "number" || !Number.isSafeInteger(row.rowid) || Object.is(row.rowid, -0) ||
+      (typeof cursor === "number" && row.rowid <= cursor) || !Array.isArray(row.values) || row.values.length !== table.columns.length) throw new TransferError("TRANSFER_FAILED");
+    for (const entry of row.values) {
+      if (!Array.isArray(entry) || entry.length !== 2 || JSON.stringify(scalar(entry[0], entry[1])) !== JSON.stringify(entry)) throw new TransferError("TRANSFER_FAILED");
+    }
+    if (byteLength(JSON.stringify(row) + "\n") > TRANSFER_LIMITS.maxRowBytes) throw new TransferError("TRANSFER_FAILED");
+    cursor = row.rowid;
+  }
+  if (value.cursor !== cursor || (!value.rows.length && !value.complete)) throw new TransferError("TRANSFER_FAILED");
+}
+
+export async function createRemoteFixedD1JobRunner(options: RemoteFixedD1JobOptions) {
+  options = { ...options, approvedDeployment: { ...options.approvedDeployment } };
+  const { job } = await loadReviewedJob(options.jobDirectory, options.reviewedJobDigest, options.snapshot, options.capability);
+  await checkFixedD1Deployment(options, job);
+  const transport = options.transport ?? ((request: Request) => fetch(request));
+  return createGuardedFixedD1Runner(options, job, {
+    targetPath: options.approvedDeployment.endpoint,
+    async open(assertActive) { await checkFixedD1Deployment(options, job); assertActive(); },
+    async request(body, assertActive, operation) {
+      await checkFixedD1Deployment(options, job);
+      assertActive();
+      try {
+        const response = await transport(new Request(options.approvedDeployment.endpoint, { method: "POST", redirect: "error", headers: { Authorization: `Bearer ${options.capability}`, "Content-Type": "application/json" }, body }));
+        const value = await readBoundedJson(response.body, DB_LIMITS.maxResponseBytes, "RESULT_LIMIT", "PROTOCOL_ERROR");
+        if (response.status !== 200 || response.redirected || (response.url && response.url !== options.approvedDeployment.endpoint) || !isJsonMediaType(response.headers.get("Content-Type")) || !isRecord(value) || value.ok !== true) throw new TransferError("TRANSFER_FAILED");
+        if (operation.op === "page") checkRemoteFixedD1Page(value, operation, job);
+        return new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+      } catch { throw new TransferError("TRANSFER_FAILED"); }
+    },
+    async close() {},
+  }, { status: "cancelled" as const, resourceOutcome: "retained" as const });
+}
+
 export type FixedD1Read = { op: "inventory" | "validate" } | { op: "page"; table: string; cursor: number | null };
 
 export async function createLocalFixedD1JobRunner(options: LocalFixedD1JobOptions) {
   const { job, migrations } = await loadReviewedJob(options.jobDirectory, options.reviewedJobDigest, options.snapshot, options.capability);
   let runtime: Miniflare | undefined;
+  return createGuardedFixedD1Runner(options, job, {
+    targetPath: options.persistTo,
+    async open(assertActive) {
+      const script = await buildJob(options.jobDirectory, job, migrations);
+      assertActive();
+      await privateDirectory(options.persistTo, true);
+      assertActive();
+      collectReleasedD1Owners();
+      runtime = new Miniflare({ modules: true, script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1Databases: ["DB"], d1Persist: join(options.persistTo, "v3", "d1"), cf: false, host: "127.0.0.1", port: 0 });
+    },
+    async request(body, assertActive) {
+      if (!runtime) throw new TransferError("INCOMPLETE_IMPORT");
+      const worker = await runtime.getWorker();
+      assertActive();
+      const response = await worker.fetch("https://fixed-job.invalid/job", { method: "POST", redirect: "error", headers: { Authorization: `Bearer ${options.capability}`, "Content-Type": "application/json" }, body });
+      const bytes = await response.arrayBuffer();
+      if (bytes.byteLength > DB_LIMITS.maxResponseBytes) throw new TransferError("TRANSFER_FAILED");
+      return new Response(bytes, { status: response.status, headers: Object.fromEntries(response.headers) });
+    },
+    async close() { if (runtime) await disposeD1Runtime(runtime); },
+  }, { status: "cancelled" as const, nativeDisposed: true as const });
+}
+
+type FixedD1RunnerOptions = Omit<LocalFixedD1JobOptions, "persistTo">;
+interface FixedD1RunnerDriver {
+  targetPath: string;
+  open(assertActive: () => void): Promise<void>;
+  request(body: string, assertActive: () => void, operation: Record<string, unknown>): Promise<Response>;
+  close(): Promise<void>;
+}
+
+function createGuardedFixedD1Runner<A>(options: FixedD1RunnerOptions, job: FixedD1Job, driver: FixedD1RunnerDriver, cancellationAcknowledgement: A) {
   let running: Promise<ImportReceipt> | undefined;
   let disposed = false;
   let closing: Promise<void> | undefined;
@@ -147,14 +291,11 @@ export async function createLocalFixedD1JobRunner(options: LocalFixedD1JobOption
   const publisher = options.receiptPublisher ?? createProtectedImportReceiptPublisher(options.receiptPath);
   const publish = createGuardedImportReceiptPublication(options.receiptPath, publisher);
   const request = async (operation: Record<string, unknown>): Promise<Response> => {
-    if (!runtime || disposed) throw new TransferError("INCOMPLETE_IMPORT");
+    assertActive();
+    if (disposed) throw new TransferError("INCOMPLETE_IMPORT");
     const body = JSON.stringify({ ...common, ...operation });
     if (byteLength(body) > DB_LIMITS.maxRequestBytes) throw new TransferError("UNSUPPORTED_DATA");
-    const worker = await runtime.getWorker();
-    const response = await worker.fetch("https://fixed-job.invalid/job", { method: "POST", redirect: "error", headers: { Authorization: `Bearer ${options.capability}`, "Content-Type": "application/json" }, body });
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength > DB_LIMITS.maxResponseBytes) throw new TransferError("TRANSFER_FAILED");
-    return new Response(bytes, { status: response.status, headers: Object.fromEntries(response.headers) });
+    return driver.request(body, assertActive, operation);
   };
   const send = async (operation: Record<string, unknown>, expected: unknown) => {
     assertActive();
@@ -169,13 +310,9 @@ export async function createLocalFixedD1JobRunner(options: LocalFixedD1JobOption
     await publish(receipt, true);
     try {
       assertActive();
-      await writeJson(join(options.jobDirectory, "attempt.json"), { runId: job.runId, jobDigest: options.reviewedJobDigest, receiptPath: options.receiptPath, targetPath: options.persistTo }, true);
-      const script = await buildJob(options.jobDirectory, job, migrations);
+      await writeJson(join(options.jobDirectory, "attempt.json"), { runId: job.runId, jobDigest: options.reviewedJobDigest, receiptPath: options.receiptPath, targetPath: driver.targetPath }, true);
+      await driver.open(assertActive);
       assertActive();
-      await privateDirectory(options.persistTo, true);
-      assertActive();
-      collectReleasedD1Owners();
-      runtime = new Miniflare({ modules: true, script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1Databases: ["DB"], d1Persist: join(options.persistTo, "v3", "d1"), cf: false, host: "127.0.0.1", port: 0 });
       receipt.writeOutcome = "partial-or-unknown";
       await publish(receipt);
       await send({ op: "bootstrap" }, { ok: true, state: "prepared", schemaFingerprint: job.targetSchemaFingerprint });
@@ -212,17 +349,18 @@ export async function createLocalFixedD1JobRunner(options: LocalFixedD1JobOption
     if (running) await running.catch(() => {});
     disposed = true;
     await Promise.allSettled(reads);
-    if (runtime) await disposeD1Runtime(runtime);
+    await driver.close();
   })();
   return {
     run() { return running ??= perform(); },
     async read(operation: FixedD1Read) {
-      if (!isRecord(operation) || !["inventory", "validate", "page"].includes(operation.op) || !exactKeys(operation, operation.op === "page" ? ["op", "table", "cursor"] : ["op"])) throw new TransferError("ARTIFACT_INVALID");
+      if (!isRecord(operation) || !["inventory", "validate", "page"].includes(operation.op) || !exactKeys(operation, operation.op === "page" ? ["op", "table", "cursor"] : ["op"]) ||
+        (operation.op === "page" && (!job.tables.some((table) => table.name === operation.table) || !(operation.cursor === null || (typeof operation.cursor === "number" && Number.isSafeInteger(operation.cursor)))))) throw new TransferError("ARTIFACT_INVALID");
       const pending = request(operation);
       reads.add(pending);
       try { return await pending; } finally { reads.delete(pending); }
     },
-    async cancel() { await close(); return { status: "cancelled" as const, nativeDisposed: true as const }; },
+    async cancel() { await close(); return cancellationAcknowledgement; },
     dispose: close,
   };
 }
