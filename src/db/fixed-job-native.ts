@@ -7,19 +7,19 @@ import type { SchemaTable, SnapshotRow, TableInventory, TransferSource } from ".
 export const FIXED_D1_VERIFICATION_LIMITS = Object.freeze({ paidInvocationQueries: 1000, admittedQueries: 960, reservedQueries: 64, pageRows: 256, pageBytes: 2097152 });
 
 type Reader = Pick<TransferSource, "query">;
-interface Plan { count: number; bytes: number; totalBytes: number; maxPages: number }
+interface Plan { count: number; maxProjectedRowChargeBytes: number; totalProjectedChargeBytes: number; maxPages: number }
 const pageBudget = FIXED_D1_VERIFICATION_LIMITS.pageBytes - 2;
 
 function overhead(columns: number) {
   return 64 + Array.from({ length: columns }, (_, index) => 66 + 3 * String(index).length).reduce((sum, size) => sum + size, 0);
 }
 
-function plan(count: number, bytes: number, totalBytes: number): Plan {
-  if (![count, bytes, totalBytes].every((value) => Number.isSafeInteger(value) && value >= 0) || bytes > pageBudget ||
-    (count === 0 ? bytes !== 0 || totalBytes !== 0 : bytes === 0 || totalBytes < bytes || totalBytes / count > bytes)) throw new TransferError("UNSUPPORTED_DATA");
-  const maxPages = count === 0 ? 1 : Math.min(count + 1, bytes === pageBudget ? count + 1 : Math.floor(count / FIXED_D1_VERIFICATION_LIMITS.pageRows) + Math.floor(totalBytes / (pageBudget - bytes)) + 2);
+function plan(count: number, maxProjectedRowChargeBytes: number, totalProjectedChargeBytes: number): Plan {
+  if (![count, maxProjectedRowChargeBytes, totalProjectedChargeBytes].every((value) => Number.isSafeInteger(value) && value >= 0) || maxProjectedRowChargeBytes > pageBudget ||
+    (count === 0 ? maxProjectedRowChargeBytes !== 0 || totalProjectedChargeBytes !== 0 : maxProjectedRowChargeBytes === 0 || totalProjectedChargeBytes < maxProjectedRowChargeBytes || totalProjectedChargeBytes / count > maxProjectedRowChargeBytes)) throw new TransferError("UNSUPPORTED_DATA");
+  const maxPages = count === 0 ? 1 : Math.min(count + 1, maxProjectedRowChargeBytes === pageBudget ? count + 1 : Math.floor(count / FIXED_D1_VERIFICATION_LIMITS.pageRows) + Math.floor(totalProjectedChargeBytes / (pageBudget - maxProjectedRowChargeBytes)) + 2);
   if (!Number.isSafeInteger(maxPages)) throw new TransferError("UNSUPPORTED_DATA");
-  return { count, bytes, totalBytes, maxPages };
+  return { count, maxProjectedRowChargeBytes, totalProjectedChargeBytes, maxPages };
 }
 
 function queryEstimate(plans: Plan[]) {
@@ -33,9 +33,9 @@ export function estimateFixedD1Verification(tables: readonly TableInventory[]) {
     if (![table.rowCount, table.maxRowBytes].every((value) => Number.isSafeInteger(value) && value >= 0) || !Array.isArray(table.columns) || !table.columns.length) throw new TransferError("ARTIFACT_INVALID");
     if (table.rowCount === 0) return plan(0, 0, 0);
     const fixed = overhead(table.columns.length);
-    const maximum = table.maxRowBytes * 6 + fixed;
-    const complete = Number.isSafeInteger(table.bytes) && table.bytes >= table.maxRowBytes && table.maxRowBytes > 0 && table.bytes / table.rowCount <= table.maxRowBytes;
-    return plan(table.rowCount, maximum, complete ? table.bytes * 6 + table.rowCount * fixed : table.rowCount * maximum);
+    const maxProjectedRowChargeBytes = table.maxRowBytes * 6 + fixed;
+    const hasUsableCanonicalTotals = Number.isSafeInteger(table.bytes) && table.bytes >= table.maxRowBytes && table.maxRowBytes > 0 && table.bytes / table.rowCount <= table.maxRowBytes;
+    return plan(table.rowCount, maxProjectedRowChargeBytes, hasUsableCanonicalTotals ? table.bytes * 6 + table.rowCount * fixed : table.rowCount * maxProjectedRowChargeBytes);
   }));
 }
 
@@ -60,7 +60,7 @@ async function page(source: Reader, table: SchemaTable, plan: Plan, cursor: numb
     return [`${name} AS c${index}`, `typeof(${name}) AS t${index}`, `length(CAST(${name} AS BLOB)) AS b${index}`];
   }).join(",");
   const selected = ["transfer_rowid", ...table.columns.flatMap((_, index) => [`c${index}`, `t${index}`, `b${index}`])].join(",");
-  const rows = await source.query(`WITH candidate AS (SELECT rowid AS transfer_rowid,${projection},${sizeExpression(table)} AS transfer_bytes FROM ${quote(table.name)}${cursor === undefined ? "" : " WHERE rowid > ?"} ORDER BY rowid LIMIT ${FIXED_D1_VERIFICATION_LIMITS.pageRows}), sized AS (SELECT *,SUM(transfer_bytes) OVER (ORDER BY transfer_rowid ROWS UNBOUNDED PRECEDING) AS transfer_total FROM candidate) SELECT ${selected} FROM sized WHERE CASE WHEN transfer_bytes > ? THEN json('!') ELSE transfer_total <= ? END ORDER BY transfer_rowid`, cursor === undefined ? [plan.bytes, pageBudget] : [cursor, plan.bytes, pageBudget]);
+  const rows = await source.query(`WITH candidate AS (SELECT rowid AS transfer_rowid,${projection},${sizeExpression(table)} AS transfer_bytes FROM ${quote(table.name)}${cursor === undefined ? "" : " WHERE rowid > ?"} ORDER BY rowid LIMIT ${FIXED_D1_VERIFICATION_LIMITS.pageRows}), sized AS (SELECT *,SUM(transfer_bytes) OVER (ORDER BY transfer_rowid ROWS UNBOUNDED PRECEDING) AS transfer_total FROM candidate) SELECT ${selected} FROM sized WHERE CASE WHEN transfer_bytes > ? THEN json('!') ELSE transfer_total <= ? END ORDER BY transfer_rowid`, cursor === undefined ? [plan.maxProjectedRowChargeBytes, pageBudget] : [cursor, plan.maxProjectedRowChargeBytes, pageBudget]);
   if (rows.length > FIXED_D1_VERIFICATION_LIMITS.pageRows || byteLength(JSON.stringify(rows)) > FIXED_D1_VERIFICATION_LIMITS.pageBytes) throw new TransferError("UNSUPPORTED_DATA");
   return rows.map((raw) => {
     if (typeof raw.transfer_rowid !== "number" || !Number.isSafeInteger(raw.transfer_rowid) || (cursor !== undefined && raw.transfer_rowid <= cursor)) throw new TransferError("UNSUPPORTED_DATA");
@@ -95,20 +95,20 @@ export async function scanFixedD1Tables(source: Reader, schema: { tables: Schema
     const hash = createHash("sha256");
     let cursor: number | undefined;
     let complete = false;
-    let bytes = 0;
+    let scannedProjectedChargeBytes = 0;
     for (let index = 0; index < plan.maxPages; index++) {
       const rows = await page(reader, table, plan, cursor);
       for (const row of rows) {
         const size = fixed + row.values.reduce((sum, [type, value]) => sum + (type === "text" ? byteLength(String(value)) * 6 : 0), 0);
-        bytes += size;
-        if (summary.rowCount >= plan.count || size > plan.bytes || bytes > plan.totalBytes) throw new TransferError("FREEZE_REQUIRED");
+        scannedProjectedChargeBytes += size;
+        if (summary.rowCount >= plan.count || size > plan.maxProjectedRowChargeBytes || scannedProjectedChargeBytes > plan.totalProjectedChargeBytes) throw new TransferError("FREEZE_REQUIRED");
         hash.update(recordRow(summary, row));
         cursor = row.rowid;
       }
       if (!rows.length) { complete = true; break; }
     }
     const after = await bounds(reader, table);
-    if (!complete || summary.rowCount !== plan.count || bytes !== plan.totalBytes || after.count !== plan.count || after.bytes !== plan.bytes || after.totalBytes !== plan.totalBytes) throw new TransferError("FREEZE_REQUIRED");
+    if (!complete || summary.rowCount !== plan.count || scannedProjectedChargeBytes !== plan.totalProjectedChargeBytes || after.count !== plan.count || after.maxProjectedRowChargeBytes !== plan.maxProjectedRowChargeBytes || after.totalProjectedChargeBytes !== plan.totalProjectedChargeBytes) throw new TransferError("FREEZE_REQUIRED");
     summary.contentDigest = hash.digest("hex");
     tables.push(summary);
   }
