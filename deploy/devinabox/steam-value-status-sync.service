@@ -1,0 +1,14 @@
+[Unit]
+Description=Steam Value browser-backed Steam Status refresh
+Wants=network-online.target
+After=network-online.target steam-value-steel.service
+Requires=steam-value-steel.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/steam-value/current
+EnvironmentFile=%h/.config/steam-value-d1/status.env
+ExecStart=%h/.local/share/mise/installs/node/24.20.0/bin/node scripts/sync-steam-status-browser.ts
+TimeoutStartSec=10min
+UMask=0077
+NoNewPrivileges=true

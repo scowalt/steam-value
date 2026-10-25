@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly Steam Value offer refresh
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5min
+Unit=steam-value-deals-refresh.service
+
+[Install]
+WantedBy=timers.target

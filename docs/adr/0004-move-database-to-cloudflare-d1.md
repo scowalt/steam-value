@@ -2,7 +2,7 @@
 
 Status: accepted for the migration design; implementation and production cutover are pending. Supersedes the Turso database/external-access choices in [ADR 0001](./0001-host-web-surface-on-cloudflare-with-turso.md) and the database/credential details in [ADR 0002](./0002-run-steam-status-from-persistent-steel-browser.md) and [ADR 0003](./0003-deploy-worker-application-through-github-actions.md). Their hosting, browser, scheduling, and gated application-deployment decisions remain in force.
 
-Move Steam Value's database from Turso to Cloudflare D1 on the account-wide Workers Paid plan rather than adding a project-only Hetzner VM. Preserve the existing Worker, Static Assets, Cloudflare Access, and external jobs on arcane. D1 retains the SQLite query engine and fits the managed Cloudflare web architecture without introducing another server to operate.
+Move Steam Value's database from Turso to Cloudflare D1 on the account-wide Workers Paid plan rather than adding a project-only Hetzner VM. Preserve the existing Worker, Static Assets, Cloudflare Access, and external jobs. [ADR 0005](./0005-replace-arcane-with-devinabox.md) replaces the original Arcane job host with devinabox because Arcane is permanently retired. D1 retains the SQLite query engine and fits the managed Cloudflare web architecture without introducing another server to operate.
 
 ## Confirmed scope and boundaries
 
@@ -21,7 +21,7 @@ Move Steam Value's database from Turso to Cloudflare D1 on the account-wide Work
 
 ## External-job access
 
-Use a machine-authenticated database endpoint on the existing Worker, restricted to its Steam Value D1 binding. Arcane jobs and manual scripts use application credentials rather than Cloudflare account API credentials. Preserve the existing human-facing API behavior; the new endpoint is for trusted tools, not browser users. Ordinary viewer authentication alone must not authorize database operations. Doppler and protected environment mechanisms remain the source of secrets; secret values stay out of repositories, infrastructure state, and logs.
+Use a machine-authenticated database endpoint on the existing Worker, restricted to its Steam Value D1 binding. External jobs and manual scripts use application credentials rather than Cloudflare account API credentials. Preserve the existing human-facing API behavior; the new endpoint is for trusted tools, not browser users. Ordinary viewer authentication alone must not authorize database operations. Doppler and protected environment mechanisms remain the source of secrets; secret values stay out of repositories, infrastructure state, and logs.
 
 The native D1 binding documents transactional batch rollback. The inspected REST references do not establish equivalent batch guarantees or single-database token isolation. A binding-backed endpoint avoids relying on those unverified properties, at the cost of owning an internal API and its authentication. Preserve used client/result semantics through tested adapters, not an assumption of complete libSQL compatibility.
 

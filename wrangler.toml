@@ -14,6 +14,7 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "steam-value"
+database_id = "e5b725a0-ea0e-4a1a-b013-1e8801936266"
 migrations_dir = "migrations"
 remote = false
 

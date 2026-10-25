@@ -1,5 +1,7 @@
 # Arcane Steam Status refresh
 
+**Historical host configuration:** the owner permanently retired Arcane on 2026-10-25. [ADR 0005](../../docs/adr/0005-replace-arcane-with-devinabox.md) selects devinabox instead. Use the [replacement deployment](../devinabox/README.md); do not wait for Arcane to return or install these old host-specific units on the replacement machine. The details below preserve the former browser/authentication and scheduling design.
+
 Steam Value uses a dedicated Steel browser on `arcane` to retain the authenticated Steam session in a Podman volume. The daily refresh reads wishlist and ignored state inside that browser, reads ownership plus both library and recent Playtime from Steam's API, and validates counts before changing game markers. The recent-playtime feed covers free games omitted from the owned-games response.
 
 **D1 preparation only:** these job templates describe the prepared external client, not the currently installed production jobs. Production stays Turso-backed until the separately approved #28 freeze, validated import, coherent consumer switch and deployment. Do not install these changes, download credentials, start services or alter timers as preparation. See [ADR 0004](../../docs/adr/0004-move-database-to-cloudflare-d1.md), the [promotion/freeze gates](../../docs/operations/d1-acceptance-map.md#promotion-and-writer-freeze-gates) and [refresh verification](../../docs/operations/d1-refresh-jobs.md).

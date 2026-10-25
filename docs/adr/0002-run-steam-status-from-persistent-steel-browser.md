@@ -1,6 +1,6 @@
 # ADR 0002: Run Steam Status from a persistent Steel browser
 
-Status: accepted for browser, authentication, and scheduling; database destination superseded by [ADR 0004](./0004-move-database-to-cloudflare-d1.md). Production database cutover remains pending.
+Status: accepted for browser, authentication, and scheduling; database destination superseded by [ADR 0004](./0004-move-database-to-cloudflare-d1.md) and Arcane host selection superseded by [ADR 0005](./0005-replace-arcane-with-devinabox.md). Production database cutover remains pending.
 
 Steam Value will refresh account-specific Steam Status from a dedicated Steel browser on `arcane`, replacing the Cloudflare Worker cron and exported `steamLoginSecure` secret described in ADR 0001.
 

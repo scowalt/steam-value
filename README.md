@@ -2,18 +2,19 @@
 
 A personal game library analyzer that ranks Steam games by review quality and HowLongToBeat Estimates. Recorded Playtime and Steam Status remain separate from public Catalog Facts.
 
-## Migration status: preparation, not production
+## D1 migration in progress
 
-**Production remains Turso-backed. Both production-changing main merges are held.** This branch prepares D1 under the approved [#17 plan](https://github.com/scowalt/steam-value/issues/17#issuecomment-6135327372); code/tests do not authorize subscription changes, provisioning, source access, deployment, arcane operations or cutover. [#27](https://github.com/scowalt/steam-value/issues/27) still requires independent review and parent-owned cleanup/closure. [#17](https://github.com/scowalt/steam-value/issues/17), [#28](https://github.com/scowalt/steam-value/issues/28) and [#29](https://github.com/scowalt/steam-value/issues/29) cannot close on code-only evidence.
+**Execution snapshot: 2026-10-25, before the tested-main deployment.** The owner directed execution on **devinabox** and permanently retired Arcane. D1 now contains the retained Turso export. Table counts, rowid summaries, the games sequence, migration schema metadata and three representative game records passed the import checks. The export was not an atomic source transaction; same-count concurrent changes are not excluded.
 
-| Surface | Existing production | Prepared integration |
-| --- | --- | --- |
-| Database | Turso; installed consumers unchanged | Complete seven-table D1 schema; native Worker `DB` binding |
-| External jobs/manual tools | Existing Turso code/configuration | HTTPS `POST /api/internal/db`, Access Service Auth **and** separate bearer credential; shared raw/Drizzle clients |
-| Infrastructure | Existing domain/viewer Access | Companion mission-control protected D1 and exact-path machine Access, not applied |
-| Promotion | Ordinary tested-main Turso deployments continue | Hold application `integration/d1-migration-17` and companion `integration/steam-value-d1-17` off main until separately approved provisioning/cutover and validated frozen import |
+| Surface | Recorded progress |
+| --- | --- |
+| Database | Existing protected `steam-value` D1 contains all seven application tables, legacy ledger and versioned migration metadata |
+| Website | Still Turso at this snapshot; this release binds the populated D1 target through normal tested-main CI |
+| External jobs/manual tools | Shared D1 clients use HTTPS `POST /api/internal/db`, Access Service Auth **and** a separate application bearer; replacement jobs belong on devinabox |
+| Credentials | Application bearer and endpoint are stored in Doppler; the production GitHub environment has the bearer for the selected Worker secret |
+| Recovery | Turso and the protected export remain retained; no accepted coherent cutover or seven-day retention start is recorded yet |
 
-Actual source schema/defaults/data/writers, Paid eligibility, permissions, edge Access and production behavior are **UNVERIFIED**. Local schema is provisional, including the conflicting `sync_state.updated_at` declarations. See the [final inventory](docs/operations/d1-consumer-schema-inventory.md#integrated-preparation-status-27), [rehearsal evidence](docs/operations/d1-integrated-rehearsal.md) and [approval/cutover/recovery runbook](docs/operations/d1-cutover.md).
+Website deployment, actual machine authentication, replacement job runs and timer activation still need execution evidence. The migration is not complete on import or code-only evidence. Follow live progress in [#17](https://github.com/scowalt/steam-value/issues/17), [#28](https://github.com/scowalt/steam-value/issues/28) and [#29](https://github.com/scowalt/steam-value/issues/29), and use the [cutover/recovery runbook](docs/operations/d1-cutover.md) and [devinabox procedures](deploy/devinabox/README.md). Historical preparation evidence remains in the [inventory](docs/operations/d1-consumer-schema-inventory.md#integrated-preparation-status-27) and [rehearsal record](docs/operations/d1-integrated-rehearsal.md).
 
 ## How it works
 
@@ -21,10 +22,10 @@ Value Score combines Bayesian-adjusted Steam review quality, a mild HowLongToBea
 
 Sources: Steam API (reviews/details/ownership/wishlist/ignored/Playtime), IsThereAnyDeal (US/USD retail discounts/bundles), HowLongToBeat (manual/batch estimates), Wikidata mappings and a local SteamDB dataset.
 
-The always-on viewer is a **Cloudflare Worker with Static Assets** at `steam-value.scowalt.com`, protected by human Cloudflare Access. It serves `/api/games`, `/api/city-builders`, `/api/sync-state`, `/api/deal-state` and `/api/health`. Prepared SQL access is machine-only, never a browser SQL UI. `workers.dev` and preview URLs stay explicitly disabled; Worker cron stays empty.
+The always-on viewer is a **Cloudflare Worker with Static Assets** at `steam-value.scowalt.com`, protected by human Cloudflare Access. It serves `/api/games`, `/api/city-builders`, `/api/sync-state`, `/api/deal-state` and `/api/health`. External SQL access is machine-only, never a browser SQL UI. `workers.dev` and preview URLs stay explicitly disabled; Worker cron stays empty.
 
-- Steam Status runs daily on **arcane**, using intentional **Node 24/Playwright** and the persistent, tailnet-only Steel profile. The Steam HttpOnly cookie stays there.
-- Catalog Facts enrichment remains occasional external/admin work; HowLongToBeat enrichment remains manual/batch. Offers run hourly on arcane with Bun. No provider requests or new refresh actions run in the Worker/browser.
+- Steam Status is scheduled daily on **devinabox**, using intentional **Node 24/Playwright** and a persistent, private Steel profile. The Steam HttpOnly cookie stays in that profile. Its replacement timer must remain disabled until a real authenticated run succeeds.
+- Catalog Facts enrichment remains occasional external/admin work; HowLongToBeat enrichment remains manual/batch. Offers are scheduled hourly on devinabox with Bun, after a successful real run. No provider requests or new refresh actions run in the Worker/browser.
 - Doppler remains the credential source; routine D1 jobs receive application credentials, not Cloudflare account credentials.
 - This application owns code/assets, binding and immutable SQL history. Mission-control owns the domain, Access and protected D1 resource; no ordinary request/deployment initializes schema.
 
@@ -90,7 +91,7 @@ The unchanged viewer retains Value Score/review/time ranking, filters for early 
 
 **On sale or in bundle** combines with existing filters before pagination. The Deals column shows linked retail % off/bundle badges (mobile compact fields) and footer attribution. A dash means no usable offer, not proof no sale exists. Offers expire strictly at 24 hours or earlier provider expiration; open tabs also expire badges. Successful empty responses remove disappeared sales; missing/failed responses never renew freshness. Country/kind caches, seven-day mappings and renewable token-fenced leases remain distinct from Steam Status and Value Score.
 
-Check provider terms for activation/DRM, vouchers and bundle choice/add-on conditions. Affiliate links remain unchanged. This is not an affiliated ITAD product or an availability guarantee. See [ITAD research](docs/research/isthereanydeal-sale-data.md) and the [arcane runbook](deploy/arcane/README.md).
+Check provider terms for activation/DRM, vouchers and bundle choice/add-on conditions. Affiliate links remain unchanged. This is not an affiliated ITAD product or an availability guarantee. See [ITAD research](docs/research/isthereanydeal-sale-data.md) and the [devinabox runbook](deploy/devinabox/README.md).
 
 ## Scheduled and historical tools
 
@@ -102,7 +103,7 @@ Official catalog refresh retains Steam's `IStoreService/GetAppList` and all-lang
 
 ## Credentials (names only)
 
-See [distribution and protection](docs/operations/d1-credentials.md). `.env.example` and arcane templates contain blank names only. Do not fill them with secrets in Git or invoke download/sync wrappers during preparation.
+See [distribution and protection](docs/operations/d1-credentials.md). `.env.example` and devinabox templates contain blank names only. Do not fill them with secrets in Git or invoke download/sync wrappers during isolated preparation.
 
 | Names | Destination after approved cutover |
 | --- | --- |
@@ -117,9 +118,9 @@ See [distribution and protection](docs/operations/d1-credentials.md). `.env.exam
 
 ## Build, promotion and recovery
 
-Unprivileged PR/push CI tests and builds without production secrets. The default-branch privileged `workflow_run` deploys only after successful `main` CI, rejects a SHA no longer current main, downloads **that run's exact tested artifact**, serializes production promotion and tags the commit. The production credential remains Worker **Editor** scoped to the existing `steam-value` Worker; no D1 provisioning, DNS, Access or Worker-creation privileges are added. Actual binding deployment permission remains UNVERIFIED until an approved capability probe/rollout.
+Unprivileged PR/push CI tests and builds without production secrets. The default-branch privileged `workflow_run` deploys only after successful `main` CI, rejects a SHA no longer current main, downloads **that run's exact tested artifact**, serializes production promotion and tags the commit. The production credential remains Worker **Editor** scoped to the existing `steam-value` Worker; no D1 provisioning, DNS, Access or Worker-creation privileges are added. The deploy workflow supplies only `STEAM_VALUE_DB_TOKEN` from the production GitHub environment to the Worker before deploying the tested artifact. Doppler remains authoritative. Actual binding deployment permission remains unverified until the rollout succeeds.
 
-`wrangler.toml` retains Static Assets, disabled workers.dev/preview URLs, observability and compatibility settings. The production D1 ID is deliberately absent until approved provisioning; do not invent one. No deploy/request migration hook exists. Do not deploy an integration/PR artifact manually or release either main-merge hold to test credentials against an empty database.
+`wrangler.toml` retains Static Assets, disabled workers.dev/preview URLs, observability and compatibility settings. Its D1 ID identifies the existing target that passed the import checks; local development remains `remote = false`. No deploy/request migration hook exists. Do not deploy an integration/PR artifact manually or use deployment as a substitute for database initialization and validation.
 
 Follow the [explicit plan → provision → freeze/drain → import/validate → coherent Worker/all-job switch → verify → retention sequence](docs/operations/d1-cutover.md). Keep Turso-backed browsing until D1 passes final validation. After D1 writes, Worker-version rollback alone is **not** data rollback: freeze again, capture/reconcile new changes, validate the intended destination and coordinate every reader/writer's reversion. Retain read-only Turso and validated exports for **at least seven days**, then require explicit owner deletion/credential-retirement approval or approved continued retention.
 
