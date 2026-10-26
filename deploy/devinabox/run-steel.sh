@@ -20,7 +20,7 @@ api_domain=${PORTLESS_TAILSCALE_URL#https://}
 api_domain=${api_domain%/}
 printf '%s\n' "$PORTLESS_URL" > "$RUNTIME_DIRECTORY/api-url"
 
-exec /usr/bin/docker run --rm --pull=never \
+exec /usr/bin/docker run --rm --pull=never --sig-proxy=false \
     --name steam-value-steel-devinabox \
     --cidfile "$RUNTIME_DIRECTORY/container-id" \
     --label info.scowalt.application=steam-value \
@@ -30,6 +30,7 @@ exec /usr/bin/docker run --rm --pull=never \
     --publish "127.0.0.1:$PORT:3000" \
     --mount "type=bind,src=$HOME/.local/share/steam-value/steel-profile,dst=/app/api/user-data-dir" \
     --mount "type=bind,src=$HOME/.local/share/steam-value/steel/display-entrypoint.sh,dst=/usr/local/bin/steam-value-steel-display,readonly" \
+    --mount "type=bind,src=$HOME/.local/share/steam-value/steel/patch-steel-shutdown.mjs,dst=/usr/local/lib/steam-value/patch-steel-shutdown.mjs,readonly" \
     --entrypoint /usr/local/bin/steam-value-steel-display \
     --env "DOMAIN=$api_domain" \
     --env USE_SSL=true \
