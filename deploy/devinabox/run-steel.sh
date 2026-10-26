@@ -11,12 +11,12 @@ fi
 : "${PORTLESS_TAILSCALE_URL:?Private API sharing is required}"
 : "${RUNTIME_DIRECTORY:?The private systemd runtime directory is required}"
 
-case "$PORTLESS_URL" in
-    https://*) ;;
-    *) printf '%s\n' 'Steel requires a trusted local HTTPS route' >&2; exit 1 ;;
+case "$PORTLESS_URL:$PORTLESS_TAILSCALE_URL" in
+    https://*:https://*) ;;
+    *) printf '%s\n' 'Steel requires local and private Tailscale HTTPS routes' >&2; exit 1 ;;
 esac
 
-api_domain=${PORTLESS_URL#https://}
+api_domain=${PORTLESS_TAILSCALE_URL#https://}
 api_domain=${api_domain%/}
 printf '%s\n' "$PORTLESS_URL" > "$RUNTIME_DIRECTORY/api-url"
 
