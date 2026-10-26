@@ -31,7 +31,11 @@ Use the actual local HTTPS API URL for browser connections. Chrome rejects the T
 
 The service writes a container ID into its private systemd runtime directory. `stop-steel.ts` checks that ID, image, labels and profile mount before stopping only its owned container. No restart loop, name-only kill or Docker prune is used.
 
-`steam-value-steel-login.service` runs the existing Node login mode with only `browser.env`. Establish its persistent Steam login before enabling the status timer. Do not put the Steam cookie into job environment files or the Worker. Local browser-view setup still needs a working host Chrome installation. The first persistent login attempts failed on a missing display; after adding Xvfb, Chrome reported stale profile lock links from the earlier stopped container. No login succeeded and no lock link was removed. Leave that profile unchanged until the explicit lock-cleanup decision; do not blindly restart login or delete profile files.
+`steam-value-steel-login.service` runs the existing Node login mode with only `browser.env`. Establish its persistent Steam login before enabling the status timer. Do not put the Steam cookie into job environment files or the Worker.
+
+The first persistent login attempts failed on a missing display and then on old Chromium profile locks. On 2026-10-26 the owner approved removing only `SingletonLock`, `SingletonCookie` and `SingletonSocket`. After stopping the owned service and rechecking the old container and link ownership, those three symlinks were removed. No other profile files or database data were deleted. The approval was for those old links only; do not remove new active locks or automate lock deletion.
+
+The login service then reached Steam's sign-in page. A supported local BB browser view displays the native Steel debug page, so the owner can scan its QR code with Steam mobile without sending credentials in chat. Google Chrome for Testing 156.0.8078.47 is installed in the plugin's private runtime; its original broken executable link is retained outside Git. The existing public Portless CA is trusted in Chrome's user NSS store for SSL only. Certificate checks remain enabled; no raw debugger or arbitrary CDP attachment is used. A displayed login page is not a successful login: wait for the login service's nonzero authenticated counts and successful exit. Close the BB view after use, and keep both job timers disabled until the separate deployment and actual job checks pass.
 
 ## Cutover
 
