@@ -2,7 +2,7 @@
 
 The owner permanently retired Arcane and selected this machine for the D1 migration and replacement external jobs. [ADR 0005](../../docs/adr/0005-replace-arcane-with-devinabox.md) supersedes the old host selection. The website remains on Cloudflare; jobs stay outside the Worker.
 
-## Prepared layout
+## Runtime layout
 
 - Complete application releases: `~/.local/share/steam-value/releases/<commit>/`.
 - Selected release: `~/.local/share/steam-value/current`.
@@ -11,11 +11,13 @@ The owner permanently retired Arcane and selected this machine for the D1 migrat
 - Offers: Bun, hourly, 45-minute timeout.
 - Both timers retain persistent catch-up and up to five minutes of jitter.
 
-These unit files are templates, not installed or enabled services. Do not start them until D1 is populated, the Worker and machine endpoint are deployed, and the four runtime keys are configured. Keep the old `steam-value-hydrate.timer` disabled; it must not run alongside the replacements.
+On 2026-10-26, the complete `9f31230` application release and four job units are installed locally. Both job timers remain disabled and neither database job has run. The private Steel API service is installed and running; that alone does not establish a successful Steam login. Keep jobs off until the populated D1 target, replacement CI deployment and actual machine authentication are accepted. Keep the old `steam-value-hydrate.timer` disabled.
+
+The owner selected Woodpecker instead of GitHub Actions. Another agent owns that CI port. Preserve tested-current-main artifact promotion and narrow deployment credentials; do not rerun Actions or use an untested manual deployment.
 
 ## Credentials
 
-Both jobs require `STEAM_VALUE_DB_URL`, `STEAM_VALUE_DB_TOKEN`, `STEAM_VALUE_ACCESS_CLIENT_ID` and `STEAM_VALUE_ACCESS_CLIENT_SECRET` from Doppler. Steam Status also needs `STEAM_API_KEY`, `STEAM_ID`, `STEEL_BASE_URL` and `STEEL_CDP_URL`; offers need `ITAD_API_KEY`. Routine job environments must not contain Turso or Cloudflare operator credentials.
+Both jobs require `STEAM_VALUE_DB_URL`, `STEAM_VALUE_DB_TOKEN`, `STEAM_VALUE_ACCESS_CLIENT_ID` and `STEAM_VALUE_ACCESS_CLIENT_SECRET` from Doppler. Steam Status also needs `STEAM_API_KEY` and `STEAM_ID`; offers need `ITAD_API_KEY`. `browser.env` supplies `STEEL_BASE_URL`, `STEEL_CDP_URL` and `NODE_EXTRA_CA_CERTS` separately, so interactive login receives no database/provider credentials. The status unit loads it after `status.env`. Routine job environments must not contain Turso or Cloudflare operator credentials.
 
 Only the application bearer goes into Worker secrets. Keep the source Turso credentials protected for recovery, outside the ordinary job configuration.
 
@@ -23,7 +25,13 @@ Only the application bearer goes into Worker secrets. Keep the source Turso cred
 
 Create a separate persistent Steel profile on this machine. The Arcane profile is unavailable; no authenticated browser session has been recovered. Keep the API and debugger private. Start browser-accessible local services through Portless with private Tailscale sharing, use its assigned backend ports, and record the actual URLs from `portless list`. Do not expose Steam cookies or debugger access publicly.
 
-The status unit depends on `steam-value-steel.service`. That browser service must be installed and its persistent Steam login established before enabling the status timer. Browser login mode does not need database credentials. Do not put the Steam cookie into job environment files or the Worker.
+The status unit depends on `steam-value-steel.service`. `run-steel.sh` starts the pinned official image through Portless, publishes only the API on its allocated loopback port, and requires private Tailscale sharing. Chrome's raw debugger port is not published. The image is pinned to `sha256:5c10c06375cb1e4833999432f307c816bf72486c8c57667d41b307fb660191fc`; `display-entrypoint.sh` adds its installed Xvfb display for interactive mode. The new profile stays under `~/.local/share/steam-value/steel-profile/`, mode 0700.
+
+Use the actual local HTTPS API URL for browser connections. Chrome rejects the Tailscale DNS hostname for debugger access; keep that check enabled. Trust the local Portless CA through `NODE_EXTRA_CA_CERTS`, not by disabling certificate checks. API HTTP access was verified at both `https://steam-value-steel-api.localhost` and `https://devinabox.hair-salmon.ts.net:8452`; obtain current URLs from `portless list` after any restart.
+
+The service writes a container ID into its private systemd runtime directory. `stop-steel.ts` checks that ID, image, labels and profile mount before stopping only its owned container. No restart loop, name-only kill or Docker prune is used.
+
+`steam-value-steel-login.service` runs the existing Node login mode with only `browser.env`. Establish its persistent Steam login before enabling the status timer. Do not put the Steam cookie into job environment files or the Worker. Local browser-view setup still needs a working host Chrome installation. The first persistent login attempts failed on a missing display; after adding Xvfb, Chrome reported stale profile lock links from the earlier stopped container. No login succeeded and no lock link was removed. Leave that profile unchanged until the explicit lock-cleanup decision; do not blindly restart login or delete profile files.
 
 ## Cutover
 

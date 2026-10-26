@@ -1,0 +1,23 @@
+[Unit]
+Description=Steam Value private persistent Steel browser
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/steam-value
+RuntimeDirectory=steam-value-steel
+RuntimeDirectoryMode=0700
+Environment=PATH=%h/.local/share/mise/installs/node/24.20.0/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh %h/.local/share/steam-value/steel/run-steel.sh
+ExecStartPost=/bin/sh %h/.local/share/steam-value/steel/wait-steel.sh
+ExecStopPost=%h/.bun/bin/bun --no-env-file %h/.local/share/steam-value/steel/stop-steel.ts
+TimeoutStartSec=210
+TimeoutStopSec=90
+KillMode=control-group
+Restart=no
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
