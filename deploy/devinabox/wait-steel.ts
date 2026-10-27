@@ -3,11 +3,12 @@ import { join } from "node:path";
 const runtime = process.env.RUNTIME_DIRECTORY;
 const home = process.env.HOME;
 if (!runtime || !home) throw new Error("Steel runtime directory and home are required");
-const marker = Bun.file(join(runtime, "api-url"));
+const markerPath = join(runtime, "api-url");
 const ca = await Bun.file(join(home, ".portless/ca.pem")).text();
 const deadline = Date.now() + 180000;
 let readyCount = 0;
 while (Date.now() < deadline) {
+  const marker = Bun.file(markerPath);
   if (!(await marker.exists())) {
     await Bun.sleep(250);
     continue;
