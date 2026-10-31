@@ -6,9 +6,11 @@ Use the existing [Woodpecker service](https://woodpecker.scowalt.com) on native 
 
 | Workflow | Events | Work |
 | --- | --- | --- |
-| `verify` | PRs; main pushes | Frozen Bun install, Chromium with disposable-container OS dependencies, all Bun tests, all type checks and Worker/static build. Main alone uploads its resulting `dist`. |
+| `verify` | PRs; main pushes | Comment policy and its regression suite, frozen Bun install, Chromium with disposable-container OS dependencies, all Bun tests, all type checks and Worker/static build. Main alone uploads its resulting `dist`. |
 | `no-comments` | All branch/tag pushes and PRs | Original uv/Python comment checker and its regression suite. |
 | `deploy` | Main pushes after both checks succeed | Fresh current-main check, frozen dependency install, exact-run artifact download, current-main check, application-bearer installation, final current-main check and original Wrangler deployment flags. |
+
+Artifact publication is gated within `verify` itself: the unchanged comment-policy commands run before tests/build, and only a successful main push may upload. The standalone `no-comments` workflow still reports policy checks for all supported events. A configuration regression test keeps the two policy steps identical and requires fail-fast ordering before artifact publication. Main pipeline 4 demonstrated that a dependent deployment workflow could start after failed verification; the cause of that scheduler behavior was not established. Explicit success filters document intent, but are not the sole barrier: without a successful policy/test/build sequence, there is no exact-run artifact to restore and no Worker publication. Do not replace this barrier with dependency ordering alone.
 
 The default Git clone is explicitly pinned with merged-PR behavior. Logs record actual checkout commit/tree/parents. Main artifact creation requires HEAD equal to `CI_COMMIT_SHA`. All workflows use the existing `ci_os=linux`, `platform=linux/amd64` agent. Images are digest-pinned; `ci/bun.sh` verifies official Bun 1.3.11 and Gitleaks 8.30.1 x86 release checksums. Keep package/runtime locks and the existing hooks intact. Node in the pinned image supports Wrangler; the scheduled Steam Status job retains its separate Node 24.20.0 runtime.
 
@@ -53,5 +55,7 @@ Activate only this repository, verify saved settings and push-only secret metada
 The Worker deploys with `--no-bundle --strict --keep-vars --message "GitHub commit $CI_COMMIT_SHA" --tag "$CI_COMMIT_SHA"`. `wrangler.toml` retains Static Assets, disabled workers.dev/preview URLs, the populated native D1 binding and observability. No schema/app-data migrations run in CI. Align the complete external-job release with the verified deployed commit, then check actual website and machine access, run real offer/Steam Status jobs and verify other consumers before enabling schedules. Keep Turso/export retained; CI success alone does not accept coherent cutover or start the retention clock.
 
 ## Local checks
+
+The production-sized mixed-width integration test has a five-minute outer test deadline for synthetic fixture preparation, bootstrap, three complete native verification requests and cleanup. Each real request still enforces the unchanged 45-second deadline, 960-query budget, 256-row page bound and 2 MiB page bound. The previous two-minute total allowed only four seconds of headroom on the successful native PR run and timed out during the next run's final request. This test-only allowance neither raises production limits nor skips assertions.
 
 Use the normal frozen install, `bun test`, `bun run build`, and both commands in [.comment-policy/README.md](../../.comment-policy/README.md). CI adapter tests and strict types are included in those commands. Lint `.woodpecker/` with the installed version-matched Woodpecker 3.19 CLI. Browser tests use isolated synthetic contexts, not the authenticated Steel profile. Do not install browser OS packages on the shared host; that step belongs in disposable CI containers.

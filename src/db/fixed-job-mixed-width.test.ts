@@ -141,7 +141,7 @@ test("observed mixed-width all-table native verification admits a wide offer out
       expect(meter.result().emptyPages).toBe(8);
     }
   } finally { await owner.dispose(); }
-}, 120000);
+}, 300000);
 
 test("byte-limited Unicode prefixes continue into full row-limited pages and a final empty page without losing typed rows", async () => {
   const owner = await createLocalD1();
