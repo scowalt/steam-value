@@ -341,26 +341,32 @@ test("official Steam fetching retains page sizes, cursors, limits, summary filte
     const requests: string[] = [];
     const { createSteamCatalogProvider } = await import("./refresh-steam-catalog");
     const provider = createSteamCatalogProvider("synthetic-steam-key", async (url, init) => {
-      requests.push(url.pathname + url.searchParams.get("last_appid"));
+      const input = url.searchParams.has("input_json") ? JSON.parse(url.searchParams.get("input_json")!) : undefined;
+      requests.push(url.pathname + (input?.appid ?? url.searchParams.get("last_appid")));
       expect(new Headers(init.headers).get("User-Agent")).toBe("steam-value catalog refresh");
       expect(init.signal).toBeInstanceOf(AbortSignal);
-      if (url.origin === "https://api.steampowered.com") {
+      if (url.pathname === "/IStoreService/GetAppList/v1/") {
+        expect(url.origin).toBe("https://api.steampowered.com");
         expect(url.pathname).toBe("/IStoreService/GetAppList/v1/");
         expect(Object.fromEntries(url.searchParams)).toEqual(url.searchParams.has("last_appid")
           ? { key: "synthetic-steam-key", include_games: "true", max_results: "50000", last_appid: "20" }
           : { key: "synthetic-steam-key", include_games: "true", max_results: "50000" });
         return Response.json({ response: url.searchParams.has("last_appid")
           ? { apps: [{ appid: 30, name: " New Last " }, { appid: 40, name: "Beyond limit" }], have_more_results: false }
-          : { apps: [{ appid: 10, name: "No successful summary" }, { appid: 20, name: "Unavailable" }, { appid: 15, name: " " }], have_more_results: true, last_appid: 20 } });
+          : { apps: [{ appid: 10, name: "No reviews" }, { appid: 20, name: "Unavailable" }, { appid: 15, name: " " }], have_more_results: true, last_appid: 20 } });
       }
-      expect(url.origin).toBe("https://store.steampowered.com");
-      expect(Object.fromEntries(url.searchParams)).toEqual({ json: "1", filter: "summary", language: "all", purchase_type: "all", num_per_page: "0" });
-      if (url.pathname === "/appreviews/20") return new Response("private-upstream-body sentinel", { status: 503 });
-      return Response.json({ success: url.pathname === "/appreviews/10" ? 0 : 1, query_summary: { total_positive: 51, total_negative: 49, total_reviews: 100 } });
+      expect(url.origin).toBe("https://api.steampowered.com");
+      expect(url.pathname).toBe("/IUserReviewsService/GetAppReviews/v1/");
+      expect([...url.searchParams.keys()]).toEqual(["input_json"]);
+      expect(input).toEqual({ appid: expect.any(Number), filter: 0, languages: ["all"], review_type: 0, purchase_type: 1, num_per_page: 1 });
+      if (input.appid === 20) return new Response("private-upstream-body sentinel", { status: 503 });
+      return Response.json({ response: { query_summary: input.appid === 10
+        ? { total_positive: 0, total_negative: 0, total_reviews: 0 }
+        : { total_positive: 51, total_negative: 49, total_reviews: 100 } } });
     });
     await main([...localArgs, "--retries", "1", "--limit-apps", "3"], { client, provider });
     expect(requests).toEqual([
-      "/IStoreService/GetAppList/v1/null", "/IStoreService/GetAppList/v1/20", "/appreviews/10null", "/appreviews/20null", "/appreviews/20null", "/appreviews/30null",
+      "/IStoreService/GetAppList/v1/null", "/IStoreService/GetAppList/v1/20", "/IUserReviewsService/GetAppReviews/v1/10", "/IUserReviewsService/GetAppReviews/v1/20", "/IUserReviewsService/GetAppReviews/v1/20", "/IUserReviewsService/GetAppReviews/v1/30",
     ]);
     expect((await client.execute("SELECT steam_app_id, name, steam_review_score, steam_review_count FROM games")).rows).toEqual([
       { steam_app_id: 30, name: "New Last", steam_review_score: 51, steam_review_count: 100 },
@@ -370,6 +376,24 @@ test("official Steam fetching retains page sizes, cursors, limits, summary filte
     ]);
     expect((await client.execute("SELECT last_app_id, apps_seen, processed_count, inserted_count, skipped_count, failed_count, completed_at FROM catalog_refresh_state")).rows).toEqual([
       { last_app_id: 30, apps_seen: 3, processed_count: 3, inserted_count: 1, skipped_count: 1, failed_count: 1, completed_at: expect.any(Number) },
+    ]);
+  } finally { await harness.dispose(); }
+});
+
+test("a missing review-service summary records failure without zeroing existing Catalog Facts", async () => {
+  const harness = await createD1WorkerTestHarness();
+  try {
+    const client = createHttpClient(harness.clientConfig);
+    await client.execute("INSERT INTO games (steam_app_id, name, steam_review_score, steam_review_count, hltb_main, value_score) VALUES (10, 'Preserved', 91, 100, 12.5, 77)");
+    const provider = createSteamCatalogProvider("synthetic-steam-key", async (url) => Response.json({ response: url.pathname === "/IStoreService/GetAppList/v1/"
+      ? { apps: [{ appid: 10, name: "Must not replace" }], have_more_results: false }
+      : {} }));
+    await main([...localArgs, "--retries", "0"], { client, provider });
+    expect((await client.execute("SELECT name, steam_review_score, steam_review_count, hltb_main, value_score FROM games")).rows).toEqual([
+      { name: "Preserved", steam_review_score: 91, steam_review_count: 100, hltb_main: 12.5, value_score: 77 },
+    ]);
+    expect((await client.execute("SELECT attempts, error FROM catalog_refresh_failures")).rows).toEqual([
+      { attempts: 1, error: "Steam review summary is missing or invalid" },
     ]);
   } finally { await harness.dispose(); }
 });

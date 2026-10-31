@@ -8,6 +8,7 @@
   "include": [
     "src/db/manual*.ts",
     "src/db/admin*.ts",
+    "src/lib/steam-reviews*.ts",
     "scripts/list.ts",
     "scripts/stats.ts",
     "scripts/top10.ts",

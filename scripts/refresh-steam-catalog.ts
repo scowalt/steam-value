@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { DB_LIMITS, DbError, toDbError, type DbClient, type DbStatement } from "../src/db/access";
 import { createExternalClient } from "../src/db/http";
+import { parseSteamReviewSummary, steamReviewSummaryUrl, type SteamReviewSummary } from "../src/lib/steam-reviews";
 
 const STATE_KEY = "steam_official_catalog";
 const DEFAULT_MIN_REVIEWS = 10;
@@ -50,12 +51,6 @@ interface CatalogRow {
 interface CatalogChange {
   kind: "insert" | "update";
   row: CatalogRow;
-}
-
-interface SteamReviewSummary {
-  totalPositive: number;
-  totalNegative: number;
-  totalReviews: number;
 }
 
 export interface SteamCatalogProvider {
@@ -198,7 +193,7 @@ Options:
   --start-after-app-id N   Start after a specific Steam app ID
   --restart                Ignore prior checkpoint and start a fresh full run
   --dry-run                Fetch and compare, but do not write or checkpoint
-  --review-delay-ms N      Delay between appreviews requests (default: ${DEFAULT_REVIEW_DELAY_MS})
+  --review-delay-ms N      Delay between review requests (default: ${DEFAULT_REVIEW_DELAY_MS})
   --retries N              Retry count for transient Steam failures (default: ${DEFAULT_RETRIES})
   --retry-delay-ms N       Base retry delay (default: ${DEFAULT_RETRY_DELAY_MS})
   --review-timeout-ms N    Per-review request timeout (default: ${DEFAULT_REVIEW_TIMEOUT_MS})
@@ -325,31 +320,12 @@ function isSteamAppListEntry(value: unknown): value is SteamAppListEntry {
 }
 
 async function fetchReviewSummary(app: SteamAppListEntry, options: RefreshOptions, send: SteamFetch): Promise<SteamReviewSummary> {
-  const url = new URL(`https://store.steampowered.com/appreviews/${app.appid}`);
-  url.searchParams.set("json", "1");
-  url.searchParams.set("filter", "summary");
-  url.searchParams.set("language", "all");
-  url.searchParams.set("purchase_type", "all");
-  url.searchParams.set("num_per_page", "0");
-
-  const data = await fetchJsonWithRetries<{
-    success?: number | boolean;
-    query_summary?: {
-      total_positive?: number;
-      total_negative?: number;
-      total_reviews?: number;
-    };
-  }>(url, options, `Steam reviews for ${app.appid}`, send);
-
-  if (data.success !== 1 && data.success !== true) {
-    return { totalPositive: 0, totalNegative: 0, totalReviews: 0 };
+  const data = await fetchJsonWithRetries<unknown>(steamReviewSummaryUrl(app.appid), options, `Steam reviews for ${app.appid}`, send);
+  try {
+    return parseSteamReviewSummary(data);
+  } catch {
+    throw new SteamProviderError("Steam review summary is missing or invalid");
   }
-
-  return {
-    totalPositive: Math.max(0, Number(data.query_summary?.total_positive ?? 0)),
-    totalNegative: Math.max(0, Number(data.query_summary?.total_negative ?? 0)),
-    totalReviews: Math.max(0, Number(data.query_summary?.total_reviews ?? 0)),
-  };
 }
 
 async function fetchJsonWithRetries<T>(
