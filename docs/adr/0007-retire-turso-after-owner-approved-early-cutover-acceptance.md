@@ -1,0 +1,5 @@
+# Retire Turso after owner-approved early cutover acceptance
+
+After accepting production on 2026-10-31, the owner explicitly chose to delete Turso and the export immediately rather than wait until November 7. This one-off decision supersedes ADR 0004's minimum retention period and ADR 0005's retained-source direction for this migration; the seven-day window did not elapse. The owner removed the export directory, the old database's deletion was verified through Turso's API, and the owner confirmed revocation of the temporary management token.
+
+D1 and its post-cutover updates are authoritative; the removed source/export are not a rollback path. Retire only the unused `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` references for that deleted database, preserving application, provider, Access and CI credentials. Worker binding cleanup remains inside successful tested-current-main artifact promotion; this decision authorizes neither an untested deployment nor a D1 reset, broad credential purge or rewrite of historical evidence. See [#29](https://github.com/scowalt/steam-value/issues/29) for the operational record and disclosed validation limits.
