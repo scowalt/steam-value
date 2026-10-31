@@ -89,7 +89,9 @@ Remote schema application is a separately approved native operator workflow, not
 
 ## Viewer capabilities
 
-The unchanged viewer retains Value Score/review/time ranking, filters for early access/played/MMO/ignored state, co-op modes, controller support, single-player, Steam links, Steam Status metadata and the city-builder view. Populated 100- and 500-game pages are supported without reducing public limits.
+The viewer uses self-hosted **0build** dark-theme components with vanilla TypeScript. Both the rankings and city-builder views share pinned local CSS; no runtime CDN or frontend framework is required. See the [integration, license and update guide](docs/ui/0build.md).
+
+The viewer retains Value Score/review/time ranking, filters for early access/played/MMO/ignored state, co-op modes, controller support, single-player, Steam links, Steam Status metadata and the city-builder view. Populated 100- and 500-game pages are supported without reducing public limits.
 
 **On sale or in bundle** combines with existing filters before pagination. The Deals column shows linked retail % off/bundle badges (mobile compact fields) and footer attribution. A dash means no usable offer, not proof no sale exists. Offers expire strictly at 24 hours or earlier provider expiration; open tabs also expire badges. Successful empty responses remove disappeared sales; missing/failed responses never renew freshness. Country/kind caches, seven-day mappings and renewable token-fenced leases remain distinct from Steam Status and Value Score.
 

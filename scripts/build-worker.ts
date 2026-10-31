@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 
 const htmlFiles = ["index.html", "city-builders.html"];
 
@@ -14,13 +14,15 @@ for (const file of htmlFiles) {
   }
 }
 
+await cp("src/web/vendor/0build/0.6.13", "dist/assets/vendor/0build/0.6.13", { recursive: true });
+
 await buildOrExit(
   Bun.build({
-    entrypoints: ["src/web/app.ts"],
+    entrypoints: ["src/web/app.ts", "src/web/city-builders.ts", "src/web/styles.css"],
     target: "browser",
     minify: true,
     outdir: "dist/assets",
-    naming: "app.js",
+    naming: "[name].[ext]",
   }),
   "browser app"
 );
