@@ -70,5 +70,6 @@ steps:
       - bun ci/current-main.ts
       - test -n "$${STEAM_VALUE_DB_TOKEN}"
       - printf '%s' "$${STEAM_VALUE_DB_TOKEN}" | bunx wrangler secret put STEAM_VALUE_DB_TOKEN --name steam-value
+      - bun ci/retired-secrets.ts
       - bun ci/current-main.ts
       - bunx wrangler deploy --no-bundle --strict --keep-vars --message "GitHub commit $${CI_COMMIT_SHA}" --tag "$${CI_COMMIT_SHA}"

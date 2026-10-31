@@ -4,7 +4,7 @@ export async function assertCurrentMain(tested: string, readMain: () => Promise<
   }
 }
 
-if (import.meta.main) {
+export async function checkCurrentMain() {
   const token = process.env.STEAM_VALUE_CONTENTS_READ_TOKEN;
   if (!token) throw new Error("Missing repository contents-read binding");
   await assertCurrentMain(process.env.CI_COMMIT_SHA ?? "", async () => {
@@ -18,3 +18,5 @@ if (import.meta.main) {
     return value.sha;
   });
 }
+
+if (import.meta.main) await checkCurrentMain();

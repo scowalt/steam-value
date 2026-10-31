@@ -38,5 +38,10 @@ test("deployment is success-only, serialized and cannot publish without the exac
     expect(step.when).toBeUndefined();
     expect(step.commands.some(command => command.includes("bun run build"))).toBe(false);
   }
-  expect(deploy.steps[publish]!.commands.filter(command => command === "bun ci/current-main.ts")).toHaveLength(2);
+  const commands = deploy.steps[publish]!.commands;
+  expect(commands.filter(command => command === "bun ci/current-main.ts")).toHaveLength(2);
+  const cleanup = commands.indexOf("bun ci/retired-secrets.ts");
+  expect(cleanup).toBeGreaterThan(commands.findIndex(command => command.includes("wrangler secret put STEAM_VALUE_DB_TOKEN")));
+  expect(cleanup).toBeLessThan(commands.lastIndexOf("bun ci/current-main.ts"));
+  expect(cleanup).toBeLessThan(commands.findIndex(command => command.includes("wrangler deploy")));
 });

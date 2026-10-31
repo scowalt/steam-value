@@ -2,19 +2,21 @@
 
 A personal game library analyzer that ranks Steam games by review quality and HowLongToBeat Estimates. Recorded Playtime and Steam Status remain separate from public Catalog Facts.
 
-## D1 migration in progress
+## D1 in production
 
-**Execution snapshot: 2026-10-25, before the tested-main deployment.** The owner directed execution on **devinabox** and permanently retired Arcane. D1 now contains the retained Turso export. Table counts, rowid summaries, the games sequence, migration schema metadata and three representative game records passed the import checks. The export was not an atomic source transaction; same-count concurrent changes are not excluded.
+**Operational cutover accepted on 2026-10-31.** The website and external consumers use D1; actual authenticated website, machine, manual-tool and refresh-job checks passed. Jobs run on **devinabox**; Arcane is permanently retired.
 
-| Surface | Recorded progress |
+| Surface | Current arrangement |
 | --- | --- |
 | Database | Existing protected `steam-value` D1 contains all seven application tables, legacy ledger and versioned migration metadata |
-| Website | Still Turso at this snapshot; this release binds the populated D1 target through normal tested-main CI |
-| External jobs/manual tools | Shared D1 clients use HTTPS `POST /api/internal/db`, Access Service Auth **and** a separate application bearer; replacement jobs belong on devinabox |
-| Credentials | Application bearer and endpoint are stored in Doppler; the production GitHub environment has the bearer for the selected Worker secret |
-| Recovery | Turso and the protected export remain retained; no accepted coherent cutover or seven-day retention start is recorded yet |
+| Website | Cloudflare Worker uses its native D1 binding; tested current-main artifacts deploy through Woodpecker |
+| External jobs/manual tools | Shared D1 clients use HTTPS `POST /api/internal/db`, Access Service Auth **and** a separate application bearer |
+| Credentials | Doppler supplies selected application/provider credentials; the publisher installs the application bearer and removes only the two retired Turso secret names |
+| Recovery | The owner waived the original seven-day wait, removed the export directory and approved the verified Turso database deletion; neither is a rollback source |
 
-Website deployment, actual machine authentication, replacement job runs and timer activation still need execution evidence. The migration is not complete on import or code-only evidence. Follow live progress in [#17](https://github.com/scowalt/steam-value/issues/17), [#28](https://github.com/scowalt/steam-value/issues/28) and [#29](https://github.com/scowalt/steam-value/issues/29), and use the [cutover/recovery runbook](docs/operations/d1-cutover.md) and [devinabox procedures](deploy/devinabox/README.md). Historical preparation evidence remains in the [inventory](docs/operations/d1-consumer-schema-inventory.md#integrated-preparation-status-27) and [rehearsal record](docs/operations/d1-integrated-rehearsal.md).
+[ADR 0007](docs/adr/0007-retire-turso-after-owner-approved-early-cutover-acceptance.md) records the early-retirement decision. Preserve current D1 data before any future recovery. The original export was paged/non-atomic and received basic schema/count/rowid/sequence/representative-record checks, not a full-content comparison. Pre-existing Catalog Facts gaps remain separate backfill work.
+
+See the [cutover record and recovery boundaries](docs/operations/d1-cutover.md), [devinabox procedures](deploy/devinabox/README.md), and [#17](https://github.com/scowalt/steam-value/issues/17)/[#29](https://github.com/scowalt/steam-value/issues/29) for current evidence. Earlier [inventory](docs/operations/d1-consumer-schema-inventory.md) and [rehearsal](docs/operations/d1-integrated-rehearsal.md) documents are historical preparation records, not active deployment holds.
 
 ## How it works
 
@@ -24,8 +26,8 @@ Sources: Steam API (reviews/details/ownership/wishlist/ignored/Playtime), IsTher
 
 The always-on viewer is a **Cloudflare Worker with Static Assets** at `steam-value.scowalt.com`, protected by human Cloudflare Access. It serves `/api/games`, `/api/city-builders`, `/api/sync-state`, `/api/deal-state` and `/api/health`. External SQL access is machine-only, never a browser SQL UI. `workers.dev` and preview URLs stay explicitly disabled; Worker cron stays empty.
 
-- Steam Status is scheduled daily on **devinabox**, using intentional **Node 24/Playwright** and a persistent, private Steel profile. The Steam HttpOnly cookie stays in that profile. Its replacement timer must remain disabled until a real authenticated run succeeds.
-- Catalog Facts enrichment remains occasional external/admin work; HowLongToBeat enrichment remains manual/batch. Offers are scheduled hourly on devinabox with Bun, after a successful real run. No provider requests or new refresh actions run in the Worker/browser.
+- Steam Status is scheduled daily on **devinabox**, using intentional **Node 24/Playwright** and a persistent, private Steel profile. The Steam HttpOnly cookie stays in that profile. Its daily timer is enabled after a successful real authenticated run.
+- Catalog Facts enrichment remains occasional external/admin work; HowLongToBeat enrichment remains manual/batch. The hourly offer timer is enabled on devinabox with Bun after successful real runs. No provider requests or new refresh actions run in the Worker/browser.
 - Doppler remains the credential source; routine D1 jobs receive application credentials, not Cloudflare account credentials.
 - This application owns code/assets, binding and immutable SQL history. Mission-control owns the domain, Access and protected D1 resource; no ordinary request/deployment initializes schema.
 
@@ -113,7 +115,6 @@ See [distribution and protection](docs/operations/d1-credentials.md). `.env.exam
 | `STEAM_API_KEY`, `STEAM_ID` | External Steam tools/status environment |
 | `STEAM_LOGIN_SECURE` | Retained manual exported-cookie tools only, never Worker/scheduled Steel job |
 | `ITAD_API_KEY` | External offers environment only |
-| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Existing production until cutover, then protected explicit migration/rollback capability retained for recovery only |
 | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN` | Approved deployment/operator environments, never routine jobs |
 
 ## Build, promotion and recovery
@@ -122,6 +123,6 @@ See [distribution and protection](docs/operations/d1-credentials.md). `.env.exam
 
 `wrangler.toml` retains Static Assets, disabled workers.dev/preview URLs, observability and compatibility settings. Its D1 ID identifies the existing target that passed the import checks; local development remains `remote = false`. No deploy/request migration hook exists. Do not deploy an integration/PR artifact manually or use deployment as a substitute for database initialization and validation.
 
-Follow the [explicit plan → provision → freeze/drain → import/validate → coherent Worker/all-job switch → verify → retention sequence](docs/operations/d1-cutover.md). Keep Turso-backed browsing until D1 passes final validation. After D1 writes, Worker-version rollback alone is **not** data rollback: freeze again, capture/reconcile new changes, validate the intended destination and coordinate every reader/writer's reversion. Retain read-only Turso and validated exports for **at least seven days**, then require explicit owner deletion/credential-retirement approval or approved continued retention.
+The [cutover runbook](docs/operations/d1-cutover.md) preserves the original plan and actual execution record. Turso and the original export have been removed under the owner's explicit early-retirement waiver; do not recreate or resume old source tooling. Worker-version rollback alone is **not** data rollback: preserve current D1, obtain a new recovery decision, validate the intended destination and coordinate every reader/writer. The supplied-handle legacy transfer adapter remains available as operator tooling, not a configured connection or automatic fallback.
 
 Account-level financial budgets/alerts belong to the owner; no application budget pause or guaranteed fixed bill is added.

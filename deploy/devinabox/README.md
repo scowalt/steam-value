@@ -11,7 +11,7 @@ The owner permanently retired Arcane and selected this machine for the D1 migrat
 - Offers: Bun, hourly, 45-minute timeout.
 - Both timers retain persistent catch-up and up to five minutes of jitter.
 
-On 2026-10-26, the complete `9f31230` application release and four job units are installed locally. Both job timers remain disabled and neither database job has run. On 2026-10-27 the owner completed Steam login. A separate bounded browser-only reopen confirmed the saved sign-in without more human input and exited successfully. The private Steel API remains running; the completed login sessions are released. Keep jobs off until the populated D1 target, replacement CI deployment and actual machine authentication are accepted. Keep the old `steam-value-hydrate.timer` disabled.
+Operational cutover was accepted on 2026-10-31. The selected complete release matches the verified deployed source; both actual D1 jobs passed, their timers are enabled, and the first hourly scheduled offer run also succeeded. The saved Steam login was reused without more human input. The private Steel API remains running with completed sessions released. Keep the old `steam-value-hydrate.timer` and old web service disabled. Historical browser-recovery notes below describe earlier failures and approvals, not current instructions to disable healthy jobs or repeat cleanup.
 
 The owner selected Woodpecker instead of GitHub Actions and on 2026-10-31 assigned this repository's port here after the shared CI service became ready. Follow the [CI runbook](../../docs/ci/woodpecker.md). Preserve tested-current-main artifact promotion and narrow deployment credentials; do not rerun Actions or use an untested manual deployment.
 
@@ -19,7 +19,7 @@ The owner selected Woodpecker instead of GitHub Actions and on 2026-10-31 assign
 
 Both jobs require `STEAM_VALUE_DB_URL`, `STEAM_VALUE_DB_TOKEN`, `STEAM_VALUE_ACCESS_CLIENT_ID` and `STEAM_VALUE_ACCESS_CLIENT_SECRET` from Doppler. Steam Status also needs `STEAM_API_KEY` and `STEAM_ID`; offers need `ITAD_API_KEY`. `browser.env` supplies `STEEL_BASE_URL`, `STEEL_CDP_URL` and `NODE_EXTRA_CA_CERTS` separately, so interactive login receives no database/provider credentials. The status unit loads it after `status.env`. Routine job environments must not contain Turso or Cloudflare operator credentials.
 
-Only the application bearer goes into Worker secrets. Keep the source Turso credentials protected for recovery, outside the ordinary job configuration.
+Only the application bearer belongs in Worker secrets. The original Turso database and export were removed under [ADR 0007](../../docs/adr/0007-retire-turso-after-owner-approved-early-cutover-acceptance.md); their connection credentials are retired, not a runtime or recovery requirement. The gated publisher removes the two obsolete Worker secret names while preserving the bearer and all other bindings.
 
 ## Replacement browser
 
@@ -45,6 +45,6 @@ The 2026-10-26 viewer-origin correction passed the private stream handshake, but
 
 ## Cutover
 
-Retain the local Turso export and the source database. The existing D1 import and basic verification are already recorded; do not reset, recreate or re-import it from this runbook or CI. Complete the verified Woodpecker rollout, preserve tested-current-main artifact promotion, and align the complete local release with the deployed commit. Verify actual machine authentication and viewer reads, run one offer refresh and one authenticated browser-backed Steam Status refresh, and confirm manual-consumer coverage before accepting coherent cutover and enabling schedules. Browser authentication alone is not successful job migration or authority to start the retention clock.
+The import, actual consumer verification, release alignment and timer activation are complete; see the [cutover record](../../docs/operations/d1-cutover.md). Turso and the original export are no longer retained after the explicit owner waiver. Do not reset/re-import D1 or replay old migration/cleanup scripts.
 
-See the [current cutover record](../../docs/operations/d1-cutover.md). No D1 import, new job start or timer enablement is implied by these templates.
+For future code installation, use the complete verified deployed commit with frozen dependencies. Pause future timer launches and drain active jobs before switching the selected release; preserve Steel, its profile and protected environment files, then restore the intended schedules. For recovery, preserve current D1 updates and obtain a new explicit data-aware decision. These templates do not authorize another schema operation, profile cleanup or destructive restore.

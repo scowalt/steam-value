@@ -1,12 +1,22 @@
 # D1 provisioning, coherent cutover and data-aware recovery
 
-**Execution is in progress under the owner's direction below.** Preparation alone did not authorize production operations. The dated execution record distinguishes completed import work from the still-pending coherent website/job cutover. Approved design: [#17](https://github.com/scowalt/steam-value/issues/17), [plan/approval map](d1-acceptance-map.md), [ADR 0004](../adr/0004-move-database-to-cloudflare-d1.md). Local [#27 evidence](d1-integrated-rehearsal.md) does not close #17/#28/#29.
+**Operational cutover was accepted and Turso retired on 2026-10-31.** Preparation alone did not authorize those operations; the owner supplied separate execution, cutover and early-retirement decisions. The original plan and dated preparation records below remain historical evidence, not active holds or instructions to repeat completed operations. Approved design: [#17](https://github.com/scowalt/steam-value/issues/17), [plan/approval map](d1-acceptance-map.md), [ADR 0004](../adr/0004-move-database-to-cloudflare-d1.md). Local [#27 evidence](d1-integrated-rehearsal.md) does not close #17/#28/#29.
 
 Historical Arcane preparation is superseded by [ADR 0005](../adr/0005-replace-arcane-with-devinabox.md) for the execution host. Historical preparation statements below are not a reason to repeat completed provisioning or consumed apply allowances.
 
 Use the [consumer/writer inventory](d1-consumer-schema-inventory.md), [credentials](d1-credentials.md), [bootstrap](d1-local-bootstrap.md), [transfer/recovery](d1-transfer-recovery.md), [refresh failure rules](d1-refresh-jobs.md) and [devinabox procedures](../../deploy/devinabox/README.md) together. Public records contain only safe results/commit IDs; source, schema details, exports, receipts, plans and reconciliation records stay in protected storage outside Git/public artifacts.
 
-## Current execution direction — 2026-10-25
+## Completed execution — 2026-10-31
+
+- The populated D1 target, authenticated human/machine access, 100/500-game pages, filters, City Builder results, raw/Drizzle/manual reads and both real refresh jobs passed execution checks. The complete local release was aligned with tested-current-main Woodpecker deployment; daily Steam Status and hourly offers timers are enabled on devinabox. The first hourly scheduled run also passed.
+- The bounded Catalog Facts dry-run exposed Steam's retired review endpoint. Its documented replacement was implemented and verified through CI and a successful write-free production dry-run. No mass backfill or destructive production cleanup was used to test manual tools.
+- The owner subsequently chose **Delete both now**, explicitly waiving the seven-day wait after the short elapsed time was explained. The owner removed the export directory (including older audit records); one supported Turso database DELETE returned success and authenticated readback confirmed absence. The temporary management token was revoked by the owner. [ADR 0007](../adr/0007-retire-turso-after-owner-approved-early-cutover-acceptance.md) records this exception; the window did not elapse.
+- The original source export was paged/non-atomic. Import verification covered counts/rowids/sequence/schema and representative records, not a full-content comparison. Existing displayed controller/mode gaps match source examples/counts and remain separate backfill work. Historical failures and sealed preparation scopes are not relabeled successful or reopened.
+- D1 and its post-cutover updates remain authoritative. The deleted source/export are not a rollback option. Preserve current D1 before any separately approved recovery; do not recreate the old export directory, rerun old imports, unlock profiles or silently restore Turso access.
+
+See [#17](https://github.com/scowalt/steam-value/issues/17), closed operational task [#28](https://github.com/scowalt/steam-value/issues/28), and [#29](https://github.com/scowalt/steam-value/issues/29) for exact deployment, retirement and credential-housekeeping evidence. The publisher now removes only the obsolete Turso Worker secret names through the existing CI gate; current source credentials are application/Access/provider credentials, not a retained Turso connection.
+
+## Historical execution direction — 2026-10-25
 
 The owner directed the migration to proceed with less testing and accepts possible data gaps for later backfill. Stop the extra local policy, capture and source-recovery test work. The pending BB report-copy question is not needed for this execution path and has no implied answer.
 
