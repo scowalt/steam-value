@@ -1,6 +1,7 @@
 when:
   - event: push
     branch: main
+    status: success
 
 depends_on:
   - verify

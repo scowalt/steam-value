@@ -20,6 +20,12 @@ clone:
       git-user-email: ci@localhost
 
 steps:
+  - name: Comment-free source and regression tests
+    image: ghcr.io/astral-sh/uv:0.11.32-python3.14-trixie@sha256:adafbab0c780d8bd995039e9dfd800f95a057867d283deee7d5eb1b3126551b2
+    commands:
+      - git show --no-patch --format='tested commit=%H tree=%T parents=%P'
+      - uv run --no-project --python 3.14 --with-requirements .comment-policy/requirements.txt python .comment-policy/check.py
+      - uv run --no-project --python 3.14 --with-requirements .comment-policy/requirements.txt python -m unittest discover -s .comment-policy -p 'test_*.py'
   - name: Test, typecheck, and build
     image: node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0
     commands:
@@ -47,3 +53,4 @@ steps:
     when:
       - event: push
         branch: main
+        status: success
