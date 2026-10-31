@@ -13,7 +13,7 @@ The owner permanently retired Arcane and selected this machine for the D1 migrat
 
 On 2026-10-26, the complete `9f31230` application release and four job units are installed locally. Both job timers remain disabled and neither database job has run. On 2026-10-27 the owner completed Steam login. A separate bounded browser-only reopen confirmed the saved sign-in without more human input and exited successfully. The private Steel API remains running; the completed login sessions are released. Keep jobs off until the populated D1 target, replacement CI deployment and actual machine authentication are accepted. Keep the old `steam-value-hydrate.timer` disabled.
 
-The owner selected Woodpecker instead of GitHub Actions. Another agent owns that CI port. Preserve tested-current-main artifact promotion and narrow deployment credentials; do not rerun Actions or use an untested manual deployment.
+The owner selected Woodpecker instead of GitHub Actions and on 2026-10-31 assigned this repository's port here after the shared CI service became ready. Follow the [CI runbook](../../docs/ci/woodpecker.md). Preserve tested-current-main artifact promotion and narrow deployment credentials; do not rerun Actions or use an untested manual deployment.
 
 ## Credentials
 
@@ -45,6 +45,6 @@ The 2026-10-26 viewer-origin correction passed the private stream handshake, but
 
 ## Cutover
 
-Retain the local Turso export and the source database. The existing D1 import and basic verification are already recorded; do not reset, recreate or re-import it from this runbook or CI. Await the other agent's verified Woodpecker path, preserve tested-current-main artifact promotion, and align the complete local release with the deployed commit. Verify actual machine authentication and viewer reads, run one offer refresh and one authenticated browser-backed Steam Status refresh, and confirm manual-consumer coverage before accepting coherent cutover and enabling schedules. Browser authentication alone is not successful job migration or authority to start the retention clock.
+Retain the local Turso export and the source database. The existing D1 import and basic verification are already recorded; do not reset, recreate or re-import it from this runbook or CI. Complete the verified Woodpecker rollout, preserve tested-current-main artifact promotion, and align the complete local release with the deployed commit. Verify actual machine authentication and viewer reads, run one offer refresh and one authenticated browser-backed Steam Status refresh, and confirm manual-consumer coverage before accepting coherent cutover and enabling schedules. Browser authentication alone is not successful job migration or authority to start the retention clock.
 
 See the [current cutover record](../../docs/operations/d1-cutover.md). No D1 import, new job start or timer enablement is implied by these templates.

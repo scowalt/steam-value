@@ -1,0 +1,49 @@
+when:
+  - event: pull_request
+  - event: push
+    branch: main
+
+labels:
+  ci_os: linux
+  platform: linux/amd64
+
+clone:
+  - name: git
+    image: woodpeckerci/plugin-git:2.10.1@sha256:550075c844fcec0af41d9d28f9860aa5d8c43e1e9419be4b9266dc02c2f29804
+    settings:
+      partial: false
+      depth: 1
+      lfs: false
+      recursive: false
+      merge-pull-request: true
+      git-user-name: Woodpecker CI
+      git-user-email: ci@localhost
+
+steps:
+  - name: Test, typecheck, and build
+    image: node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0
+    commands:
+      - . ci/bun.sh
+      - bun install --frozen-lockfile
+      - bunx playwright install --with-deps chromium
+      - bun test
+      - bun run build
+  - name: Preserve tested deployment artifact
+    image: node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0
+    environment:
+      STEAM_VALUE_ARTIFACT_ENDPOINT:
+        from_secret: steam_value_artifact_endpoint
+      STEAM_VALUE_ARTIFACT_BUCKET:
+        from_secret: steam_value_artifact_bucket
+      STEAM_VALUE_ARTIFACT_REGION:
+        from_secret: steam_value_artifact_region
+      STEAM_VALUE_ARTIFACT_ACCESS_KEY:
+        from_secret: steam_value_artifact_write_access_key
+      STEAM_VALUE_ARTIFACT_SECRET_KEY:
+        from_secret: steam_value_artifact_write_secret_key
+    commands:
+      - export PATH="$${PWD}/.ci-bun/bun-linux-x64:$${PATH}"
+      - bun ci/artifact.ts upload
+    when:
+      - event: push
+        branch: main

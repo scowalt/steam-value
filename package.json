@@ -7,7 +7,7 @@
     "add": "doppler run --project steam-value --config dev -- bun scripts/add-game.ts",
     "list": "doppler run --project steam-value --config dev -- bun scripts/list.ts",
     "recalc": "doppler run --project steam-value --config dev -- bun scripts/recalculate.ts",
-    "typecheck": "bunx tsc -p tsconfig.worker.json && bunx tsc -p tsconfig.web.json && bunx tsc -p tsconfig.browser-sync.json && bun run typecheck:db && bun run typecheck:db-access && bun run typecheck:catalog && bun run typecheck:manual",
+    "typecheck": "bunx tsc -p tsconfig.worker.json && bunx tsc -p tsconfig.web.json && bunx tsc -p tsconfig.browser-sync.json && bun run typecheck:db && bun run typecheck:db-access && bun run typecheck:catalog && bun run typecheck:manual && bunx tsc -p tsconfig.ci.json",
     "typecheck:db": "bunx tsc -p tsconfig.db-tools.json",
     "typecheck:db-access": "bunx tsc -p tsconfig.db-access.json",
     "typecheck:catalog": "bunx tsc -p tsconfig.catalog.json",
