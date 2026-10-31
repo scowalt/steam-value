@@ -1,3 +1,4 @@
+import { parseSteamReviewSummary, steamReviewSummaryUrl } from "./steam-reviews";
 
 export interface SteamData {
   appId: number;
@@ -46,17 +47,6 @@ const CATEGORY_IDS = {
   FULL_CONTROLLER: 28,
   PARTIAL_CONTROLLER: 18,
 } as const;
-
-interface SteamReviewsResponse {
-  success: number;
-  query_summary: {
-    review_score: number;
-    review_score_desc: string;
-    total_positive: number;
-    total_negative: number;
-    total_reviews: number;
-  };
-}
 
 interface SteamAppDetailsResponse {
   [appId: string]: {
@@ -164,7 +154,12 @@ export class SteamClient {
 
       try {
         const response = await fetch(url);
-        const data = await response.json();
+        if (!response.ok && response.status !== 429) {
+          await response.body?.cancel();
+          throw new Error(`Steam API HTTP ${response.status}`);
+        }
+        if (response.status === 429) await response.body?.cancel();
+        const data = response.status === 429 ? null : await response.json();
 
         if (this.isRateLimited(response, data)) {
           if (attempt < this.config.maxRetries) {
@@ -221,16 +216,10 @@ export class SteamClient {
       return cached;
     }
 
-    const reviewsUrl = `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all`;
-    const reviewsData = await this.fetchWithRetry<SteamReviewsResponse>(reviewsUrl);
-
-    if (!reviewsData.success) {
-      throw new Error(`Steam API returned unsuccessful response for app ${appId}`);
-    }
-
-    const { total_positive, total_reviews } = reviewsData.query_summary;
+    const reviewsData = await this.fetchWithRetry<unknown>(steamReviewSummaryUrl(appId).href);
+    const { totalPositive, totalReviews } = parseSteamReviewSummary(reviewsData);
     const reviewScore =
-      total_reviews > 0 ? Math.round((total_positive / total_reviews) * 100) : 0;
+      totalReviews > 0 ? Math.round((totalPositive / totalReviews) * 100) : 0;
 
     const detailsUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}`;
     const detailsData = await this.fetchWithRetry<SteamAppDetailsResponse>(detailsUrl);
@@ -244,7 +233,7 @@ export class SteamClient {
       appId,
       name: appDetails.data.name,
       reviewScore,
-      reviewCount: total_reviews,
+      reviewCount: totalReviews,
     };
 
     this.cache.set(cacheKey, result, this.config.cacheTtlMs);
