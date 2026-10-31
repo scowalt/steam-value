@@ -22,7 +22,7 @@ uv run --no-project --python 3.14 --with-requirements .comment-policy/requiremen
 The pre-commit hook passes `--staged` and reads the **complete Git index**, not the
 working copy. Partially staged files cannot conceal a staged comment. Stage the
 initial cleanup together with the policy before committing. The manual command
-checks tracked and non-ignored new files. The GitHub Actions workflow checks the
+checks tracked and non-ignored new files. The Woodpecker `no-comments` workflow checks the
 committed checkout and runs the checker regression suite on pushes and PRs.
 Hooks can be bypassed, but the CI workflow still reports violations. Making this
 workflow a required branch-protection check is an owner-controlled GitHub setting.

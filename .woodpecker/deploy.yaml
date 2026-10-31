@@ -1,0 +1,73 @@
+when:
+  - event: push
+    branch: main
+
+depends_on:
+  - verify
+  - no-comments
+
+concurrency:
+  limit: 1
+  group: production
+
+labels:
+  ci_os: linux
+  platform: linux/amd64
+
+clone:
+  - name: git
+    image: woodpeckerci/plugin-git:2.10.1@sha256:550075c844fcec0af41d9d28f9860aa5d8c43e1e9419be4b9266dc02c2f29804
+    settings:
+      partial: false
+      depth: 1
+      lfs: false
+      recursive: false
+      merge-pull-request: true
+      git-user-name: Woodpecker CI
+      git-user-email: ci@localhost
+
+steps:
+  - name: Reject stale commits and install deployment dependencies
+    image: node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0
+    environment:
+      STEAM_VALUE_CONTENTS_READ_TOKEN:
+        from_secret: steam_value_contents_read_token
+    commands:
+      - . ci/bun.sh
+      - test "$(git rev-parse HEAD)" = "$${CI_COMMIT_SHA}"
+      - bun ci/current-main.ts
+      - bun install --frozen-lockfile
+  - name: Download tested artifact
+    image: node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0
+    environment:
+      STEAM_VALUE_ARTIFACT_ENDPOINT:
+        from_secret: steam_value_artifact_endpoint
+      STEAM_VALUE_ARTIFACT_BUCKET:
+        from_secret: steam_value_artifact_bucket
+      STEAM_VALUE_ARTIFACT_REGION:
+        from_secret: steam_value_artifact_region
+      STEAM_VALUE_ARTIFACT_ACCESS_KEY:
+        from_secret: steam_value_artifact_read_access_key
+      STEAM_VALUE_ARTIFACT_SECRET_KEY:
+        from_secret: steam_value_artifact_read_secret_key
+    commands:
+      - export PATH="$${PWD}/.ci-bun/bun-linux-x64:$${PATH}"
+      - bun ci/artifact.ts download
+  - name: Deploy tested current main
+    image: node:24-bookworm@sha256:14078204b6bb268c107ceff6d3c43f45a888105e5c2b18b14c32b3409d93a1b0
+    environment:
+      CLOUDFLARE_API_TOKEN:
+        from_secret: steam_value_cloudflare_api_token
+      CLOUDFLARE_ACCOUNT_ID:
+        from_secret: steam_value_cloudflare_account_id
+      STEAM_VALUE_CONTENTS_READ_TOKEN:
+        from_secret: steam_value_contents_read_token
+      STEAM_VALUE_DB_TOKEN:
+        from_secret: steam_value_db_token
+    commands:
+      - export PATH="$${PWD}/.ci-bun/bun-linux-x64:$${PATH}"
+      - bun ci/current-main.ts
+      - test -n "$${STEAM_VALUE_DB_TOKEN}"
+      - printf '%s' "$${STEAM_VALUE_DB_TOKEN}" | bunx wrangler secret put STEAM_VALUE_DB_TOKEN --name steam-value
+      - bun ci/current-main.ts
+      - bunx wrangler deploy --no-bundle --strict --keep-vars --message "GitHub commit $${CI_COMMIT_SHA}" --tag "$${CI_COMMIT_SHA}"

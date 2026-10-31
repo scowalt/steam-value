@@ -8,6 +8,7 @@ Requires=steam-value-steel.service
 Type=oneshot
 WorkingDirectory=%h/.local/share/steam-value/current
 EnvironmentFile=%h/.config/steam-value-d1/status.env
+EnvironmentFile=%h/.config/steam-value-d1/browser.env
 ExecStart=%h/.local/share/mise/installs/node/24.20.0/bin/node scripts/sync-steam-status-browser.ts
 TimeoutStartSec=10min
 UMask=0077

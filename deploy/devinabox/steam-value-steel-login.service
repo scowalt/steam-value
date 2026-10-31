@@ -1,0 +1,14 @@
+[Unit]
+Description=Steam Value interactive Steel Steam login
+After=steam-value-steel.service
+Requires=steam-value-steel.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/steam-value/current
+EnvironmentFile=%h/.config/steam-value-d1/browser.env
+Environment=STEEL_LOGIN_TIMEOUT_MS=14400000
+ExecStart=%h/.local/share/mise/installs/node/24.20.0/bin/node scripts/sync-steam-status-browser.ts --login
+RuntimeMaxSec=4h 5min
+UMask=0077
+NoNewPrivileges=true
