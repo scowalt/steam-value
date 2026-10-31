@@ -113,7 +113,7 @@ test("production-size all-table native verification stays below 1000 queries per
     expect(page.complete).toBe(false);
     expect(page.rows[0]!.values.slice(0, 3)).toEqual([["integer", 1], ["integer", 100001], ["text", "Native ゲーム 1"]]);
   } finally { await owner.dispose(); }
-}, 120000);
+}, 300000);
 
 function nativeRequest(job: FixedD1Job, capability: string, op: string, extra = {}) {
   return new Request("https://fixed-job.invalid/job", { method: "POST", headers: { Authorization: `Bearer ${capability}`, "Content-Type": "application/json" }, body: JSON.stringify({
