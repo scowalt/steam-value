@@ -174,6 +174,7 @@ function renderGames() {
   const cardsFragment = document.createDocumentFragment();
 
   const now = Date.now() / 1000;
+  const checkIcon = '<svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
   visibleGames(now).forEach((game, i) => {
     const dealsHtml = renderDeals(game.deals, now);
     const rank = i + 1;
@@ -181,9 +182,9 @@ function renderGames() {
 
     let controllerHtml = "-";
     if (game.controllerSupport === "full") {
-      controllerHtml = '<span class="controller-full">Full</span>';
+      controllerHtml = '<span class="z-label z-label-success">Full</span>';
     } else if (game.controllerSupport === "partial") {
-      controllerHtml = '<span class="controller-partial">Partial</span>';
+      controllerHtml = '<span class="z-label z-label-warning">Partial</span>';
     }
 
     let playtimeHtml = "-";
@@ -202,8 +203,8 @@ function renderGames() {
     }
 
     tr.innerHTML = `
-      <td class="wishlist">${game.isOnWishlist ? '<span class="wishlist-check">✓</span>' : ''}</td>
-      <td class="owned">${game.isOwned ? '<span class="owned-check">✓</span>' : ''}</td>
+      <td class="wishlist">${game.isOnWishlist ? `<span class="wishlist-check" role="img" aria-label="On wishlist">${checkIcon}</span>` : ''}</td>
+      <td class="owned">${game.isOwned ? `<span class="owned-check" role="img" aria-label="Owned">${checkIcon}</span>` : ''}</td>
       <td class="rank">${rank}</td>
       <td class="game-name">
         <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
@@ -219,28 +220,28 @@ function renderGames() {
       <td class="hours">${game.hltbMain?.toFixed(1) ?? "?"} hrs</td>
       <td class="playtime">${playtimeHtml}</td>
       <td class="mode">${modeHtml}</td>
-      <td class="ea">${game.isEarlyAccess ? '<span class="ea-check">✓</span>' : ''}</td>
+      <td class="ea">${game.isEarlyAccess ? `<span class="ea-check" role="img" aria-label="Early Access">${checkIcon}</span>` : ''}</td>
       <td class="controller">${controllerHtml}</td>
     `;
     tableFragment.appendChild(tr);
 
     const tags = [];
-    if (game.isOwned) tags.push('<span class="game-tag game-tag-owned">✓ Owned</span>');
-    if (game.isOnWishlist) tags.push('<span class="game-tag game-tag-wishlist">✓ Wishlist</span>');
-    if (game.hasSinglePlayer) tags.push('<span class="game-tag game-tag-sp">Single-player</span>');
-    if (game.hasMultiplayer) tags.push('<span class="game-tag game-tag-mp">Multiplayer</span>');
-    if (game.isEarlyAccess) tags.push('<span class="game-tag game-tag-ea">Early Access</span>');
+    if (game.isOwned) tags.push('<span class="z-label z-label-info">Owned</span>');
+    if (game.isOnWishlist) tags.push('<span class="z-label z-label-success">Wishlist</span>');
+    if (game.hasSinglePlayer) tags.push('<span class="z-label">Single-player</span>');
+    if (game.hasMultiplayer) tags.push('<span class="z-label z-label-info">Multiplayer</span>');
+    if (game.isEarlyAccess) tags.push('<span class="z-label z-label-warning">Early Access</span>');
     if (game.controllerSupport === "full") {
-      tags.push('<span class="game-tag game-tag-controller-full">Full controller</span>');
+      tags.push('<span class="z-label z-label-success">Full controller</span>');
     } else if (game.controllerSupport === "partial") {
-      tags.push('<span class="game-tag game-tag-controller-partial">Partial controller</span>');
+      tags.push('<span class="z-label z-label-warning">Partial controller</span>');
     }
 
     const card = document.createElement("article");
-    card.className = "game-card";
+    card.className = "game-card z-card";
     card.innerHTML = `
-      <div class="game-card-header">
-        <h2 class="game-card-title">
+      <div class="game-card-header z-card-header">
+        <h2 class="game-card-title z-card-title">
           <span class="game-card-rank">#${rank}</span>
           <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
             ${escapeHtml(game.name)}
@@ -269,7 +270,7 @@ function renderGames() {
         <dt>Deals</dt>
         <dd>${dealsHtml}</dd>
       </dl>
-      <div class="game-card-tags">${tags.length > 0 ? tags.join("") : '<span class="game-tag">Mode and controller unknown</span>'}</div>
+      <div class="game-card-tags z-card-footer">${tags.length > 0 ? tags.join("") : '<span class="z-label">Mode and controller unknown</span>'}</div>
     `;
     cardsFragment.appendChild(card);
   });

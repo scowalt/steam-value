@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 2,
+  "title": "Design System: Steam Value",
+  "extensions": {
+    "shadows": [
+      { "name": "control", "value": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)", "purpose": "Pinned 0build card and control elevation." },
+      { "name": "small", "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)", "purpose": "Checkbox elevation." }
+    ],
+    "motion": [
+      { "name": "table-hover", "value": "background-color 150ms ease-in-out", "purpose": "0build row feedback; disabled by reduced-motion preference." }
+    ],
+    "breakpoints": [
+      { "name": "filter-stack", "value": "1100px" },
+      { "name": "ranking-cards", "value": "900px" },
+      { "name": "header-stack", "value": "640px" },
+      { "name": "single-checkbox-column", "value": "350px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Pagination and retry actions.",
+      "html": "<button class=\"ds-primary\" type=\"button\">Load More</button>",
+      "css": ".ds-primary{font:500 14px/20px system-ui;padding:7px 14px;border:1px solid transparent;border-radius:6px;background:var(--z-primary,oklch(96.7% 0.001 286.375));color:var(--z-primary-f,oklch(21% 0.006 285.885));cursor:pointer}.ds-primary:hover{opacity:.9}.ds-primary:focus-visible{outline:2px solid var(--z-info-f,oklch(70.7% 0.165 254.624));outline-offset:3px}.ds-primary:disabled{opacity:.5;cursor:default}"
+    },
+    {
+      "name": "Default button",
+      "kind": "button",
+      "description": "Secondary navigation action.",
+      "html": "<button class=\"ds-default\" type=\"button\">City builders</button>",
+      "css": ".ds-default{font:500 14px/20px system-ui;padding:7px 14px;border:1px solid #ffffff1f;border-radius:6px;background:transparent;color:var(--z-bg-f,oklch(96.7% 0.001 286.375));cursor:pointer}.ds-default:hover{background:#ffffff14}.ds-default:focus-visible{outline:2px solid var(--z-info-f,oklch(70.7% 0.165 254.624));outline-offset:3px}"
+    },
+    {
+      "name": "Search input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Native, labelled search field with visible borders.",
+      "html": "<label class=\"ds-field\">Search games<input class=\"ds-input\" type=\"search\" placeholder=\"Search by game name…\"></label>",
+      "css": ".ds-field{display:grid;gap:8px;color:var(--z-bg-f,oklch(96.7% 0.001 286.375));font:500 14px/20px system-ui}.ds-input{font:400 14px/20px system-ui;min-height:44px;padding:7px 14px;border:1px solid #ffffff73;border-radius:6px;background:var(--z-bg,oklch(14.1% 0.005 285.823));color:inherit}.ds-input::placeholder{color:var(--z-muted-f,oklch(70.5% 0.015 286.067))}.ds-input:focus-visible{outline:2px solid var(--z-info-f,oklch(70.7% 0.165 254.624));outline-offset:3px}"
+    },
+    {
+      "name": "View navigation",
+      "kind": "nav",
+      "description": "Links between existing views, with a current-page state.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Game views\"><a href=\"#rankings\" aria-current=\"page\">Rankings</a><a href=\"#city-builders\">City builders</a></nav>",
+      "css": ".ds-nav{display:flex;flex-wrap:wrap;gap:8px;font:500 14px/20px system-ui}.ds-nav a{padding:7px 14px;border:1px solid #ffffff1f;border-radius:6px;color:var(--z-bg-f,oklch(96.7% 0.001 286.375));text-decoration:none}.ds-nav a[aria-current],.ds-nav a:hover{background:#ffffff14}.ds-nav a:focus-visible{outline:2px solid var(--z-info-f,oklch(70.7% 0.165 254.624));outline-offset:3px}"
+    },
+    {
+      "name": "Deal label",
+      "kind": "chip",
+      "description": "Underlined offer link with a translucent semantic surface.",
+      "html": "<span class=\"ds-deal\"><a href=\"#offer\">60% off</a></span>",
+      "css": ".ds-deal{display:inline-flex;padding:2px 10px;font:600 12px/16px system-ui;border:1px solid color-mix(in srgb,var(--z-success,oklch(69.6% 0.17 162.48)) 24%,transparent);border-radius:6px;background:color-mix(in srgb,var(--z-success,oklch(69.6% 0.17 162.48)) 12%,transparent);color:var(--z-success-f,oklch(76.5% 0.177 163.223))}.ds-deal a{display:inline-flex;align-items:center;min-height:24px;color:inherit;text-decoration:underline;text-underline-offset:.2em}.ds-deal:hover{opacity:.8}.ds-deal a:focus-visible{outline:2px solid var(--z-info-f,oklch(70.7% 0.165 254.624));outline-offset:3px}"
+    },
+    {
+      "name": "Card surface",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "0build surface for mobile game records and the filter panel.",
+      "html": "<article class=\"ds-card\"><h2>Game name</h2><p>Reviews · HLTB · Played</p></article>",
+      "css": ".ds-card{padding:16px;border:1px solid #ffffff1f;border-radius:6px;background:var(--z-card,#151518);color:var(--z-card-f,oklch(96.7% 0.001 286.375));font:400 14px/20px system-ui;box-shadow:0 1px 3px #0000001a,0 1px 2px -1px #0000001a}.ds-card h2{margin:0;font-size:16px;line-height:1.4;font-weight:600}.ds-card p{margin:12px 0 0;color:var(--z-muted-f,oklch(70.5% 0.015 286.067))}"
+    }
+  ],
+  "narrative": {
+    "overview": "0build's dark, compact component system supports a game-comparison task. Tables and native controls lead; cards adapt the rankings to small screens. The system is intentionally conventional and information-dense, as approved in issue #39.",
+    "dos": [
+      "Do reuse 0build classes and tokens; keep application-specific layout in the styles cascade layer.",
+      "Do preserve native keyboard behavior, skip links, visible focus and readable dark-theme options.",
+      "Do verify actual computed contrast when upgrading the vendor pin."
+    ],
+    "donts": [
+      "Don't replace component foundations with lookalike CSS or add a JavaScript runtime for CSS-only controls.",
+      "Don't trade dense, readable game facts for decorative metrics or truncate long game names.",
+      "Don't load UI dependencies from runtime CDNs."
+    ]
+  }
+}

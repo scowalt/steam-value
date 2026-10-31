@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chromium, type Browser, type Page, type Route } from "playwright";
+import type { Browser, Page, Route } from "playwright";
 import { DEAL_MAX_AGE_SECONDS, type DealOffer, type GameDeals } from "../services/deal-types";
 import { activeOffers, nextDealChange, renderDeals } from "./deal-display";
+import { buildViewerAssets, closeViewerBrowser, launchViewerBrowser, textContrast, type ViewerAssets } from "./testing";
 
 const now = 1_800_000_000;
 function displayText(html: string): string {
@@ -88,21 +89,17 @@ describe("deal display", () => {
 
 describe("mocked frontend behavior", () => {
   let browser: Browser;
-  let html: string;
-  let script: string;
+  let assets: ViewerAssets;
   beforeAll(async () => {
-    const build = await Bun.build({ entrypoints: [new URL("./app.ts", import.meta.url).pathname], target: "browser" });
-    if (!build.success || !build.outputs[0]) throw new Error("Frontend bundle failed");
-    script = await build.outputs[0].text();
-    html = await Bun.file(new URL("./index.html", import.meta.url)).text();
-    browser = await chromium.launch({ headless: true });
+    assets = await buildViewerAssets();
+    browser = await launchViewerBrowser();
   });
-  afterAll(async () => { await browser?.close(); });
+  afterAll(async () => { await closeViewerBrowser(browser); });
 
   async function withPage(
     gamesHandler: (route: Route, url: URL) => Promise<void>,
     run: (page: Page) => Promise<void>,
-    options: { width?: number } = {},
+    options: { width?: number; syncState?: unknown } = {},
   ) {
     const context = await browser.newContext({ viewport: { width: options.width ?? 1440, height: 900 }, serviceWorkers: "block" });
     const page = await context.newPage();
@@ -112,10 +109,10 @@ describe("mocked frontend behavior", () => {
     await context.route("**/*", async (route) => {
       const url = new URL(route.request().url());
       if (url.origin !== "https://steam-value.test") return route.abort();
-      if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: html });
-      if (url.pathname === "/app.js") return route.fulfill({ contentType: "application/javascript", body: script });
+      const asset = assets.get(url.pathname);
+      if (asset) return route.fulfill(asset);
       if (url.pathname === "/api/games") return gamesHandler(route, url);
-      if (url.pathname === "/api/sync-state") return route.fulfill({ json: null });
+      if (url.pathname === "/api/sync-state") return route.fulfill({ json: options.syncState ?? null });
       return route.abort();
     });
     try {
@@ -171,6 +168,57 @@ describe("mocked frontend behavior", () => {
       }, { width });
     });
   }
+
+  test("uses local 0build styles and keyboard-operated native filters", async () => {
+    await withPage(async (route) => route.fulfill({ json: [game(1)] }), async (page) => {
+      await page.locator("#games-list tr").waitFor();
+      expect(await page.locator('link[rel="stylesheet"]').evaluateAll((links) => links.map((link) => new URL((link as HTMLLinkElement).href).origin)))
+        .toEqual(["https://steam-value.test", "https://steam-value.test"]);
+      expect(await page.locator("#on-sale").evaluate((element) => getComputedStyle(element).appearance)).toBe("none");
+      expect(await page.locator("#on-sale").evaluate((element) => getComputedStyle(element).borderRadius)).toBe("2px");
+      expect(await page.locator("#coop-filter").evaluate((element) => getComputedStyle(element).appearance)).toBe("auto");
+      expect(await textContrast(page, "#coop-filter option")).toBeGreaterThanOrEqual(4.5);
+      expect(await page.locator("html").evaluate((element) => getComputedStyle(element).getPropertyValue("--z-card").trim())).toBe("#151518");
+      await page.keyboard.press("Tab");
+      expect(await page.locator(".skip-link").evaluate((element) => element === document.activeElement)).toBe(true);
+      await page.keyboard.press("Enter");
+      expect(await page.locator("#rankings").evaluate((element) => element === document.activeElement)).toBe(true);
+      const checkbox = page.getByRole("checkbox", { name: "Hide Ignored", exact: true });
+      await checkbox.focus();
+      expect(await checkbox.evaluate((element) => getComputedStyle(element).outlineWidth)).not.toBe("0px");
+      const filtered = page.waitForResponse((response) => response.url().includes("/api/games") && !new URL(response.url()).searchParams.has("hideIgnored"));
+      await page.keyboard.press("Space");
+      await filtered;
+      expect(await checkbox.isChecked()).toBe(false);
+      const controller = page.getByRole("combobox", { name: "Controller", exact: true });
+      await controller.focus();
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      expect(await controller.inputValue()).toBe("full");
+      expect(await page.locator('nav [aria-current="page"]').innerText()).toBe("Rankings");
+      expect(await page.locator("#sync-status").innerText()).toBe("Never refreshed");
+    });
+  });
+
+  test("keeps long names, Steam Status and distinct estimates/Playtime readable on mobile", async () => {
+    const name = '<script>alert("game")</script> ' + "LongGameName".repeat(20);
+    await withPage(async (route) => route.fulfill({ json: [{ ...game(1), name, isOwned: true, isEarlyAccess: true, playtimeMinutes: 23 }] }), async (page) => {
+      const card = page.locator("#games-cards article");
+      await card.waitFor();
+      expect(await card.locator(".game-card-title a").innerText()).toBe(name);
+      expect(await card.locator("script").count()).toBe(0);
+      expect(await card.locator(".game-card-stats").innerText()).toContain("8.0 hrs");
+      expect(await card.locator(".game-card-stats").innerText()).toContain("23m");
+      expect(await card.locator(".game-card-tags").innerText()).toContain("Owned");
+      expect(await card.locator(".game-card-tags").innerText()).toContain("Early Access");
+      for (const selector of [".z-label-success", ".z-label-warning", ".z-label-info", ".review-count", ".game-card-score strong"]) {
+        expect(await textContrast(page, `#games-cards ${selector}`)).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(await page.locator("#sync-status").innerText()).toContain("12 updated");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await page.locator("#controller-filter").evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+    }, { width: 320, syncState: { lastSuccessAt: now, gamesUpdated: 12, isRunning: false, lastError: null } });
+  });
 
   test("combines all filters server-side, preserves pagination and resets offset on changes", async () => {
     const requests: URLSearchParams[] = [];

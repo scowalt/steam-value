@@ -45,10 +45,10 @@ export function renderDeals(deals: GameDeals | undefined, now: number): string {
   const bundle = offers.find((offer) => offer.kind === "bundle");
   const badges = [];
   if (retail && retail.discountPercent !== null) {
-    badges.push(`<span class="deal-badge">${offerLink(retail, `${retail.discountPercent}% off`)}</span>`);
+    badges.push(`<span class="deal-badge z-label z-label-success">${offerLink(retail, `${retail.discountPercent}% off`)}</span>`);
   }
   if (bundle) {
-    badges.push(`<span class="deal-badge">${offerLink(bundle, "In bundle")}</span>`);
+    badges.push(`<span class="deal-badge z-label z-label-success">${offerLink(bundle, "In bundle")}</span>`);
   }
   return `<div class="game-deals">${badges.join(" ") || "—"}</div>`;
 }
