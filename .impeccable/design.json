@@ -18,6 +18,13 @@
   },
   "components": [
     {
+      "name": "Steam Value brand",
+      "kind": "custom",
+      "description": "Approved Shortlist mark and live-text wordmark; shared home link above both game views.",
+      "html": "<a class=\"ds-brand\" href=\"/\" aria-label=\"Steam Value home\"><svg viewBox=\"0 0 64 64\" aria-hidden=\"true\"><path d=\"M4 24h8v32H4Z M18 14h8v42h-8Z\"/><path fill-rule=\"evenodd\" d=\"M36 4h20a4 4 0 0 1 4 4v44a4 4 0 0 1-4 4H36a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Z M40 20v17l13-8.5Z\"/></svg><span class=\"ds-wordmark\" aria-hidden=\"true\">steam<span>value</span></span></a>",
+      "css": ".ds-brand{display:inline-flex;align-items:center;gap:10px;min-height:44px;color:var(--z-bg-f,oklch(96.7% 0.001 286.375));border-radius:6px;text-decoration:none}.ds-brand:hover{text-decoration:none}.ds-brand:focus-visible{outline:2px solid var(--z-info-f,oklch(70.7% 0.165 254.624));outline-offset:3px}.ds-brand svg{display:block;width:40px;height:40px;flex:none;fill:#34d399}.ds-wordmark{font:700 28px/1 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;letter-spacing:-.035em;white-space:nowrap}.ds-wordmark>span{font-weight:400}"
+    },
+    {
       "name": "Primary button",
       "kind": "button",
       "refersTo": "button-primary",

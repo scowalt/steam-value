@@ -8,6 +8,7 @@ colors:
   muted: "oklch(70.5% 0.015 286.067)"
   primary: "oklch(96.7% 0.001 286.375)"
   primary-foreground: "oklch(21% 0.006 285.885)"
+  brand: "#34d399"
   success: "oklch(69.6% 0.17 162.48)"
   success-foreground: "oklch(76.5% 0.177 163.223)"
   info: "oklch(62.3% 0.214 259.815)"
@@ -15,6 +16,17 @@ colors:
   warning: "oklch(76.9% 0.188 70.08)"
   warning-foreground: "oklch(82.8% 0.189 84.429)"
 typography:
+  brand:
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    fontSize: "1.75rem"
+    fontWeight: 700
+    lineHeight: 1
+    letterSpacing: "-0.035em"
+  page-title:
+    fontSize: "1.125rem"
+    fontWeight: 500
+    lineHeight: 1.4
+    letterSpacing: "normal"
   heading:
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
     fontSize: "calc(0.875rem * 2.441)"
@@ -43,6 +55,10 @@ spacing:
   medium: "1rem"
   section: "1.5rem"
 components:
+  brand-mark:
+    textColor: "{colors.brand}"
+    width: "2.5rem"
+    height: "2.5rem"
   button-primary:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.primary-foreground}"
@@ -71,7 +87,11 @@ Use the pinned 0build semantic tokens. Neutral foregrounds carry names and contr
 
 Status labels use their semantic colour at 12% opacity for the fill and 24% for the border, with the contrasting dark-theme foreground. Input borders use white at 45%; ordinary surface dividers use white at 12%. Focus uses the information foreground.
 
+The owner-selected **Shortlist** mark uses brand green: three ascending game cases with a play cutout. Browser icons use theme-specific green for contrast; see [branding assets and regeneration](docs/ui/branding.md). This is Steam Value's own identity, not Valve's Steam logo.
+
 ## Typography
+
+The lowercase `steamvalue` wordmark pairs bold `steam` with regular-weight `value` using the brand typography role. Route names use the smaller page-title role beside the wordmark, wrapping beneath it when space is tight. The route name remains the page's single H1.
 
 Use the system sans stack; do not introduce a remote font dependency. The compact base, heading and label roles are defined above. Card titles wrap; scores and statistics use tabular numerals. Keep descriptive copy to at most 72 characters per line where space permits. HLTB estimates and recorded Playtime retain distinct labels.
 
@@ -91,6 +111,7 @@ Use the shared control radius for cards, inputs, buttons and status labels. Nati
 
 ## Components
 
+- **Brand:** a shared 40px mark plus live-text wordmark links home on both views. The link has a 44px minimum height, an accessible name and visible keyboard focus. The adjacent mark is decorative to assistive technology because the link already names Steam Value.
 - **Buttons and navigation:** 0build primary/default/secondary/ghost variants; native links for switching existing views, with `aria-current` identifying the current view. Mobile view links have a 44px minimum height.
 - **Forms:** labelled native checkboxes, selects and search inputs. Preserve native select arrows and explicit dark option colours. Keep the filter label click areas at least 44px tall.
 - **Tables:** 0build small, divided, hoverable tables. Right-align quantitative columns and retain tabular numerals. City-builder headers contain real buttons and expose `aria-sort`.

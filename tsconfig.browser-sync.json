@@ -7,6 +7,7 @@
   },
   "include": [
     "scripts/sync-steam-status-browser.ts",
+    "scripts/generate-favicon.ts",
     "scripts/refresh-deals.ts",
     "scripts/hydrate-daily.ts",
     "scripts/refresh-jobs.integration.test.ts",
@@ -15,6 +16,7 @@
     "src/services/*deals*.test.ts",
     "src/services/itad-client.test.ts",
     "src/worker/games.test.ts",
-    "src/web/deal-display.test.ts"
+    "src/web/deal-display.test.ts",
+    "src/web/brand.test.ts"
   ]
 }
