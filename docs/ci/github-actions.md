@@ -1,8 +1,10 @@
-# GitHub Actions handoff
+# GitHub Actions CI/CD
 
-**Target: the public `scowalt/steam-value` repository is the sole development home, with GitHub Issues/PRs and GitHub-hosted Actions for all CI/CD. No permanent private development mirror or Woodpecker publishing lane remains.** Runtime data, authentication and private audit evidence are not development infrastructure and remain private.
+**The public `scowalt/steam-value` repository is the sole development home, with GitHub Issues/PRs and GitHub-hosted Actions for all CI/CD. No private development mirror or Woodpecker publishing lane remains.** Runtime data, authentication and private audit evidence are not development infrastructure and remain private.
 
-The owner approved local implementation and the coordinated hosted migration on 2026-11-01, including the listed CI credential configuration, gated deployment and public visibility after final audits. [Issue #42](https://github.com/scowalt/steam-value/issues/42) records actual execution and acceptance; approval alone is not evidence of completion. The existing remote main operates under [ADR 0006](../adr/0006-run-ci-and-tested-artifact-deployment-on-woodpecker.md) until the handoff. [ADR 0008](../adr/0008-prepare-public-source-actions-handoff.md) records the replacement. Do not push/merge merely to try it: current remote main pushes deploy through Woodpecker. This patch archives its configurations and removes its production-helper path, so delivery must be coordinated with retirement, not treated as an independently deployable intermediate change.
+The owner-approved cutover completed on 2026-11-01 UTC. [Issue #42](https://github.com/scowalt/steam-value/issues/42) records verification and acceptance. The initial [Actions promotion](https://github.com/scowalt/steam-value/actions/runs/41260103296/attempts/2) deployed main `1460dad5ad77e718ea13f807be0d4fa6c09531ae`; all eight prior application files were byte-identical, with only two license/notice assets added. Native D1 binding and disabled workers.dev/preview URLs were preserved; anonymous viewer requests remained denied. No Steam Status, Steel profile or D1 row contents were inspected, so this is not a fresh authenticated functional/data-validation claim.
+
+This repository's Woodpecker integration is inactive, its hook removed and all 19 historical pipeline records retained privately. [ADR 0008](../adr/0008-prepare-public-source-actions-handoff.md) replaces [ADR 0006](../adr/0006-run-ci-and-tested-artifact-deployment-on-woodpecker.md). The archived configurations are not a second publishing path.
 
 ## Verification without publication
 
@@ -35,9 +37,11 @@ Before installing the application bearer and immediately before Wrangler deploym
 
 Wrangler retains `--no-bundle --strict --keep-vars`, the tested commit message/tag, current Static Assets, disabled workers.dev/preview URLs, Access, observability and native D1 binding. CI performs no schema migrations, account sync, database initialization or reset. The retired Turso database/export are not recreated. External devinabox services and schedules are outside this handoff.
 
-## Required hosted configuration — not provisioned
+## Hosted configuration
 
-Before supplying any credentials, configure **both** `artifact-publication` and `production` with a selected **branch** rule for exactly `main`, and **no tag rules**. Do not allow `refs/pull/*/merge`. Do not select “protected branches only” as a substitute: GitHub permits all branches with that option when no branch protections exist. Preserve existing protections and any required reviewers; an environment name alone does not require approval. An owner review gate for the first promotion can be added with separate approval. If the account plan cannot enforce the required restrictions while private, stop rather than weaken them.
+Both environments are configured with a selected `main` branch rule and no tag rules: five artifact-publication secret slots, eight production slots, zero repository-wide secrets. The publication variable is `github-actions`, workflow tokens are read-only, there are no self-hosted runners, and all external-fork contributors require workflow approval. Keep these restrictions when maintaining the setup.
+
+Before supplying any credentials to a replacement environment, configure **both** `artifact-publication` and `production` with a selected **branch** rule for exactly `main`, and **no tag rules**. Do not allow `refs/pull/*/merge`. Do not select “protected branches only” as a substitute: GitHub permits all branches with that option when no branch protections exist. Preserve existing protections and any required reviewers; an environment name alone does not require approval. An owner review gate for the first promotion can be added with separate approval. If the account plan cannot enforce the required restrictions while private, stop rather than weaken them.
 
 Keep all selected values in environment secrets, **not repository-wide secrets**. Doppler remains authoritative; provision only the named subset through an approved operator process, never a broad Doppler token or values copied into source/logs.
 
@@ -52,7 +56,9 @@ Keep all selected values in environment secrets, **not repository-wide secrets**
 
 The current-main reader uses the built-in, job-scoped `github.token` with `contents: read`; it does not require a new personal token or transfer the Woodpecker Contents-reader credential. Existing GitHub secret **names** are not proof of their values, validity or scope. No Steam, Access machine, D1 operator, state, backup or Turso credentials belong in Actions.
 
-## Approval-gated delivery and single-controller handoff
+## Completed handoff procedure
+
+The steps below record the coordinated migration, not a pending task or instructions to re-enable Woodpecker. Preserve the same single-controller and disclosure gates for any future migration.
 
 1. Approve the reviewed patch and remote delivery separately. Keep repository visibility private, the release-controller variable absent/off, and legacy Deploy disabled. Record current heads, protections, workflow states and queued/running publishers. [Legacy workflow files](legacy-actions/) are preserved outside `.github/workflows`; never re-enable the old Deploy workflow or use it as the new controller.
 2. With explicit approval, deliver a branch/PR and enable only replacement verification and comment-policy Actions. Prove credential-free hosted PR verification. Do not give public fork traffic access to Woodpecker, even with an approval prompt. Do not merge to main before the approved promotion fence is in place.
@@ -61,9 +67,9 @@ The current-main reader uses the built-in, job-scoped `github.token` with `conte
 5. Only after explicit handoff/deployment approval, set the repository release-controller variable to `github-actions` and authorize a **whole-workflow rerun of the current main push** (or another approved current-main push). This is the first publishing action, not a harmless validation. Verify the artifact's exact provider/run/attempt/SHA, one serialized promotion, and preserved native D1/Access behavior. Hosted success and production acceptance are separate from local tests.
 6. Keep visibility private until the separate final publication review/approval. Refresh source/ref/metadata/log/artifact/license evidence at the exact revision, resolve any in-scope uninspected package surfaces, confirm private-runner entrypoints are disabled, then apply an explicitly approved visibility change. Check anonymous source access, protections, workflow/fork settings and no unexpected runs. Runtime data/profile/viewer access does not become public.
 
-If handoff fails, turn off the Actions release-controller variable and drain started Actions promotions; keep the already deployed application running. Repair and validate the Actions path rather than leaving a permanent Woodpecker fallback. Any emergency reversal requires a separate owner decision and coordinated source/configuration restoration from history; the archived files are not runnable rollback instructions. Never enable both as a retry strategy, redeploy an untested artifact, or treat Worker rollback as D1 rollback. Retain private artifacts/evidence and report the blocker.
+If promotion fails, turn off the Actions release-controller variable and drain started Actions promotions; keep the already deployed application running. Repair and validate the Actions path rather than leaving a permanent Woodpecker fallback. Any emergency reversal requires a separate owner decision and coordinated source/configuration restoration from history; the archived files are not runnable rollback instructions. Never enable both as a retry strategy, redeploy an untested artifact, or treat Worker rollback as D1 rollback. Retain private artifacts/evidence and report the blocker.
 
-Completion requires a public canonical repository for all source/issues/PRs, successful hosted PR/main verification and exact-artifact CD, no active Woodpecker hook/registration/configuration for this repository, and no private-runner access from forks. Merely enabling Actions or publishing the source does not complete the migration.
+Successful operation requires a public canonical repository for all source/issues/PRs, successful hosted PR/main verification and exact-artifact CD, no active Woodpecker hook/registration/configuration for this repository, and no private-runner access from forks. Maintain these invariants; merely enabling Actions or publishing source is insufficient.
 
 ## Verification and limits
 

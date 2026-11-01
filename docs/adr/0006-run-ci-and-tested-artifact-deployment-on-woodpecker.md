@@ -1,5 +1,7 @@
 # Run CI and tested-artifact deployment on Woodpecker
 
+Status: the CI-provider decision was superseded by [ADR 0008](./0008-prepare-public-source-actions-handoff.md) on 2026-11-01. Woodpecker is retired for this repository; the historical rationale below does not authorize a second controller. Exact-artifact, policy, serialization, current-main and narrow-credential safeguards remain in the Actions implementation.
+
 Accepted by the owner on 2026-10-31, following the earlier Woodpecker port decisions. Replace GitHub Actions execution with the existing native Linux x86-64 Woodpecker service. This supersedes ADR 0003's CI-provider and independent default-branch deployment-definition choices, not its infrastructure ownership, tested-artifact, current-main, serialization or narrow-credential requirements. Keep the Actions definitions as disabled historical references.
 
 PR verification has no production or artifact secrets. Main verification uploads its exact built output to the existing private `steam-value-ci-artifacts` R2 bucket; the separately isolated deployment workflow downloads only that pipeline-number/commit artifact, verifies its hashes and seven-day lifetime, checks current main before deployment, and never rebuilds. Both verification and comment policy must succeed. Production deployment is serialized and is not automatically canceled.
