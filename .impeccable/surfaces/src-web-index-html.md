@@ -7,7 +7,7 @@ related_targets: ["src/web/city-builders.html","src/web/styles.css"]
 
 # Steam Value viewer
 
-Mode: Operate. Scope: rankings and city-builder views. Preserve game data, filters, defaults, API requests, pagination, offer expiry and external links. The owner approved the scoped 0build migration in issue #39; no new identity selection or production deployment is needed.
+Mode: Operate. Scope: rankings and city-builder views. Preserve game data, filters, defaults, API requests, pagination, offer expiry and external links. The owner approved the scoped 0build migration in issue #39 and subsequently selected logo concept C, the Shortlist. Preserve the selected mark and lowercase split-weight wordmark; no production deployment is authorized.
 
 ## Direction contract
 
@@ -17,7 +17,7 @@ OWN-WORLD: 0build's native dark neutral surfaces, system sans typography, compac
 
 STORY: Read the Value Score ordering, narrow the same game list with familiar filters, inspect reviews/estimates/Playtime, then follow a Steam or deal link. The city-builder view keeps search and sortable columns.
 
-FIRST VIEWPORT: Title and Steam Status above a compact filter panel; rankings immediately below in a divided table. At 900px and below the same records become compact cards with score, three statistics, deals and status labels. City-builder search precedes a horizontally scrollable table. Standard hover/focus feedback is the interaction language; no entrance animation or hidden content.
+FIRST VIEWPORT: Shared Shortlist home-link lockup, route H1 and Steam Status above a compact filter panel; rankings immediately below in a divided table. At 900px and below the same records become compact cards with score, three statistics, deals and status labels. City-builder search precedes a horizontally scrollable table. Standard hover/focus feedback is the interaction language; no entrance animation or hidden content.
 
 FORM: User-pinned 0build dark theme and existing table/card composition; no randomized seed applies. Preserve behavior rather than inventing a new visual world.
 

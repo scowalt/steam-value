@@ -1,17 +1,14 @@
 #!/usr/bin/env bun
 import { cp, mkdir, rm } from "node:fs/promises";
 
-const htmlFiles = ["index.html", "city-builders.html"];
+const staticFiles = ["index.html", "city-builders.html", "logo.svg", "favicon.svg", "favicon.ico"];
 
 await rm("dist", { recursive: true, force: true });
 await mkdir("dist/assets", { recursive: true });
 await mkdir("dist/worker", { recursive: true });
 
-for (const file of htmlFiles) {
-  const source = Bun.file(`src/web/${file}`);
-  if (await source.exists()) {
-    await Bun.write(`dist/assets/${file}`, source);
-  }
+for (const file of staticFiles) {
+  await Bun.write(`dist/assets/${file}`, Bun.file(`src/web/${file}`));
 }
 
 await cp("src/web/vendor/0build/0.6.13", "dist/assets/vendor/0build/0.6.13", { recursive: true });

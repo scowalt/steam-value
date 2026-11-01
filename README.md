@@ -95,7 +95,7 @@ Remote schema application is a separately approved native operator workflow, not
 
 ## Viewer capabilities
 
-The viewer uses self-hosted **0build** dark-theme components with vanilla TypeScript. Both the rankings and city-builder views share pinned local CSS; no runtime CDN or frontend framework is required. See the [integration, license and update guide](docs/ui/0build.md).
+The viewer uses self-hosted **0build** dark-theme components with vanilla TypeScript. Both the rankings and city-builder views share pinned local CSS; no runtime CDN or frontend framework is required. See the [integration, license and update guide](docs/ui/0build.md) and [logo/favicon assets and regeneration](docs/ui/branding.md).
 
 The viewer retains Value Score/review/time ranking, filters for early access/played/MMO/ignored state, co-op modes, controller support, single-player, Steam links, Steam Status metadata and the city-builder view. Populated 100- and 500-game pages are supported without reducing public limits.
 

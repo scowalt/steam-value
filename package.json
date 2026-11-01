@@ -14,6 +14,7 @@
     "typecheck:catalog": "bunx tsc -p tsconfig.catalog.json",
     "typecheck:manual": "bunx tsc -p tsconfig.manual.json",
     "build": "bun run typecheck && bun scripts/build-worker.ts",
+    "favicon:generate": "bun --no-env-file scripts/generate-favicon.ts",
     "web": "bun run secrets:dev && bun run build && bunx wrangler dev",
     "worker:dev": "bun run web",
     "secrets:dev": "bun scripts/cloudflare-secrets.ts dev-vars",

@@ -1,6 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright";
 
-export type ViewerAssets = Map<string, { contentType: string; body: string }>;
+export type ViewerAssets = Map<string, { contentType: string; body: string | Buffer }>;
 
 export async function launchViewerBrowser(): Promise<Browser> {
   Bun.gc(true);
@@ -57,6 +57,12 @@ export async function buildViewerAssets(): Promise<ViewerAssets> {
     const asset = { contentType: "text/html", body: await Bun.file(new URL(file, base)).text() };
     assets.set(`/${file}`, asset);
     assets.set(file === "index.html" ? "/" : "/city-builders", asset);
+  }
+  for (const file of ["logo.svg", "favicon.svg", "favicon.ico"]) {
+    assets.set(`/${file}`, {
+      contentType: file.endsWith(".svg") ? "image/svg+xml" : "image/x-icon",
+      body: Buffer.from(await Bun.file(new URL(file, base)).arrayBuffer()),
+    });
   }
   assets.set("/vendor/0build/0.6.13/kit.min.css", {
     contentType: "text/css",
