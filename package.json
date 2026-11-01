@@ -3,6 +3,7 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "add": "doppler run --project steam-value --config dev -- bun scripts/add-game.ts",
     "list": "doppler run --project steam-value --config dev -- bun scripts/list.ts",

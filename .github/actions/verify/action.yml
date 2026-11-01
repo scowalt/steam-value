@@ -1,0 +1,37 @@
+name: Verify source and build
+description: Run the same credential-free policy, tests and build before any artifact publication.
+runs:
+  using: composite
+  steps:
+    - name: Record tested checkout
+      shell: bash
+      run: git show --no-patch --format='tested commit=%H tree=%T parents=%P'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '24.20.0'
+    - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+      with:
+        cache: false
+        env: false
+    - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+      with:
+        version: '0.11.32'
+        enable-cache: false
+    - name: Reject source comments and docstrings
+      shell: bash
+      run: uv run --no-project --python 3.14 --with-requirements .comment-policy/requirements.txt python .comment-policy/check.py
+    - name: Test comment-policy adapters and staged snapshots
+      shell: bash
+      run: uv run --no-project --python 3.14 --with-requirements .comment-policy/requirements.txt python -m unittest discover -s .comment-policy -p 'test_*.py'
+    - name: Install dependencies
+      shell: bash
+      run: bun --no-env-file install --frozen-lockfile
+    - name: Install Chromium in the disposable runner
+      shell: bash
+      run: bun --no-env-file x --no-install playwright install --with-deps chromium
+    - name: Test
+      shell: bash
+      run: bun --no-env-file test
+    - name: Typecheck and build
+      shell: bash
+      run: bun --no-env-file run build

@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { artifactKey, createArtifact, restoreArtifact, transferArtifact } from "./artifact";
+import { artifactKey, createArtifact, restoreArtifact, transferArtifact, type Identity } from "./artifact";
 
-const identity = { repository: "scowalt/steam-value", run: "42", commit: "1234567890123456789012345678901234567890" };
+const identity: Identity = { repository: "scowalt/steam-value", provider: "github-actions", run: "42", attempt: "1", commit: "1234567890123456789012345678901234567890" };
 const now = 1_800_000_000;
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
@@ -52,7 +52,7 @@ test("fails for missing, empty or non-regular output instead of publishing an em
 });
 
 test("addresses only the triggering repository, run and commit without an older-run fallback", () => {
-  expect(artifactKey(identity)).toBe("steam-value/42/1234567890123456789012345678901234567890.json");
+  expect(artifactKey(identity)).toBe("steam-value/github-actions/42/1/1234567890123456789012345678901234567890.json");
   for (const invalid of [{ ...identity, run: "../41" }, { ...identity, commit: "main" }, { ...identity, repository: "other/repo" }]) {
     expect(() => artifactKey(invalid)).toThrow();
   }
@@ -93,4 +93,34 @@ test("restores the successful run's exact binary output, not a rebuild", async (
   const artifact = await createArtifact(join(root, "dist"), identity, now);
   await restoreArtifact(artifact, join(root, "restored"), identity, now + 1);
   expect([...await readFile(join(root, "restored/worker/index.js"))]).toEqual([0, 255, 42]);
+});
+
+test("Actions artifacts bind provider, run and attempt without reusing Woodpecker objects", async () => {
+  const root = await workspace();
+  const github: Identity = { ...identity, provider: "github-actions", attempt: "2" };
+  expect(artifactKey(github)).toBe(`steam-value/github-actions/42/2/${identity.commit}.json`);
+  const artifact = await createArtifact(join(root, "dist"), github, now);
+  expect(JSON.parse(artifact).version).toBe(2);
+  for (const expected of [identity, { ...github, run: "43" }, { ...github, commit: "a".repeat(40) }]) {
+    await expect(restoreArtifact(artifact, join(root, "rejected"), expected, now)).rejects.toThrow();
+  }
+  const legacy = JSON.stringify({ ...JSON.parse(artifact), version: 1, identity: { repository: identity.repository, run: identity.run, commit: identity.commit } });
+  await expect(restoreArtifact(legacy, join(root, "rejected"), github, now)).rejects.toThrow();
+  await restoreArtifact(artifact, join(root, "actions"), github, now);
+  expect([...await readFile(join(root, "actions/worker/index.js"))]).toEqual([0, 255, 42]);
+  await expect(restoreArtifact(artifact, join(root, "actions"), github, now)).rejects.toThrow();
+});
+
+test("rejects malformed provider/attempt identities, including tampered envelope identities", async () => {
+  const root = await workspace();
+  const github: Identity = { ...identity, provider: "github-actions", attempt: "1" };
+  for (const invalid of [{ ...github, attempt: "" }, { ...github, attempt: "../1" }, { ...github, attempt: "0" }]) {
+    expect(() => artifactKey(invalid)).toThrow();
+    await expect(createArtifact(join(root, "dist"), invalid, now)).rejects.toThrow();
+  }
+  const artifact = JSON.parse(await createArtifact(join(root, "dist"), github, now));
+  for (const provider of ["untrusted", "woodpecker", null, undefined]) {
+    artifact.identity.provider = provider;
+    await expect(restoreArtifact(JSON.stringify(artifact), join(root, "rejected"), github, now)).rejects.toThrow();
+  }
 });

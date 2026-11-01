@@ -2,6 +2,12 @@
 
 A personal game library analyzer that ranks Steam games by review quality and HowLongToBeat Estimates. Recorded Playtime and Steam Status remain separate from public Catalog Facts.
 
+## Source, licensing and contributions
+
+Original code is [MIT-licensed](LICENSE); third-party code and provider data retain their own [licenses and notices](THIRD_PARTY_NOTICES.md). Use the canonical [GitHub repository](https://github.com/scowalt/steam-value), its issues and PRs for all development. See [CONTRIBUTING.md](CONTRIBUTING.md) for credential-free setup and review.
+
+The target is a public repository with **GitHub-hosted Actions for all CI and CD**, not a permanent Woodpecker/private-development lane. The [local migration patch and approval-gated handoff](docs/ci/github-actions.md) are prepared; hosted retirement, activation and publication must be completed separately. Source publication does not expose the owner's Steam Status, authenticated Steel profile, D1 database, backups, credentials or Access-protected viewer. Never add those resources or real account fixtures to Git.
+
 ## D1 in production
 
 **Operational cutover accepted on 2026-10-31.** The website and external consumers use D1; actual authenticated website, machine, manual-tool and refresh-job checks passed. Jobs run on **devinabox**; Arcane is permanently retired.
@@ -9,7 +15,7 @@ A personal game library analyzer that ranks Steam games by review quality and Ho
 | Surface | Current arrangement |
 | --- | --- |
 | Database | Existing protected `steam-value` D1 contains all seven application tables, legacy ledger and versioned migration metadata |
-| Website | Cloudflare Worker uses its native D1 binding; tested current-main artifacts deploy through Woodpecker |
+| Website | Cloudflare Worker uses its native D1 binding; replacement GitHub Actions exact-artifact CD is prepared, with hosted handoff still pending |
 | External jobs/manual tools | Shared D1 clients use HTTPS `POST /api/internal/db`, Access Service Auth **and** a separate application bearer |
 | Credentials | Doppler supplies selected application/provider credentials; the publisher installs the application bearer and removes only the two retired Turso secret names |
 | Recovery | The owner waived the original seven-day wait, removed the export directory and approved the verified Turso database deletion; neither is a rollback source |
@@ -121,7 +127,9 @@ See [distribution and protection](docs/operations/d1-credentials.md). `.env.exam
 
 ## Build, promotion and recovery
 
-[Woodpecker CI](docs/ci/woodpecker.md) runs unprivileged PR verification on the existing native x86 Linux runner. Successful main verification and comment policy gate serialized deployment of **that pipeline's exact retained artifact**, with current-main checks and a commit tag; deployment does not rebuild. Selected artifact and deployment secrets are server-side push-only, with the accepted collaborator-trust limits in [ADR 0006](docs/adr/0006-run-ci-and-tested-artifact-deployment-on-woodpecker.md). The production credential remains Worker **Editor** scoped to the existing `steam-value` Worker; no D1 provisioning, DNS, Access or Worker-creation privileges are added. Only the separate `STEAM_VALUE_DB_TOKEN` goes into Worker secrets. Doppler remains authoritative. Original Actions definitions are disabled historical references, not a concurrent publisher. Actual deployment remains gated on legitimate credentials and a successful hosted run.
+[GitHub Actions](docs/ci/github-actions.md) is the sole target CI/CD controller. PRs use GitHub-hosted runners without protected environments or secrets. Successful main verification, including comment policy, gates publication of **that run/attempt's exact tested artifact** to the existing private R2 bucket; serialized deployment checks current main repeatedly and never rebuilds. The artifact writer and production credentials are in separate main-only environments. The production credential remains Worker **Editor** scoped to the existing `steam-value` Worker; no D1 provisioning, DNS, Access or Worker-creation privileges are added. Only the separate `STEAM_VALUE_DB_TOKEN` goes into Worker secrets. Doppler remains authoritative; no broad Doppler token is needed in Actions.
+
+The prepared workflow is verification-only unless the repository variable `STEAM_VALUE_RELEASE_CONTROLLER` is explicitly set to `github-actions`. [ADR 0008](docs/adr/0008-prepare-public-source-actions-handoff.md) requires draining/retiring this repository's Woodpecker webhook/registration before the approved main merge and Actions activation. Current remote main still uses the old controller until that handoff; do not push/merge this patch as an uncoordinated intermediate deployment. Old [Woodpecker](docs/ci/legacy-woodpecker/) and [Actions](docs/ci/legacy-actions/) definitions are archived as documentation, not active fallback lanes. Public visibility, complete hosted CI/CD acceptance and retirement of all private-runner entrypoints are required to finish the migration.
 
 `wrangler.toml` retains Static Assets, disabled workers.dev/preview URLs, observability and compatibility settings. Its D1 ID identifies the existing target that passed the import checks; local development remains `remote = false`. No deploy/request migration hook exists. Do not deploy an integration/PR artifact manually or use deployment as a substitute for database initialization and validation.
 

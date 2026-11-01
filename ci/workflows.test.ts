@@ -3,9 +3,9 @@ import { expect, test } from "bun:test";
 interface Rule { event: string | string[]; branch?: string; status?: string }
 interface Step { name: string; image: string; commands: string[]; when?: Rule[]; failure?: string }
 interface Workflow { when: Rule[]; depends_on?: string[]; concurrency?: { limit: number; group: string }; steps: Step[] }
-const load = async (name: string): Promise<Workflow> => Bun.YAML.parse(await Bun.file(new URL(`../.woodpecker/${name}.yaml`, import.meta.url)).text()) as Workflow;
+const load = async (name: string): Promise<Workflow> => Bun.YAML.parse(await Bun.file(new URL(`../docs/ci/legacy-woodpecker/${name}.yaml`, import.meta.url)).text()) as Workflow;
 
-test("only a successful main push publishes an artifact after policy, tests and build", async () => {
+test("archived Woodpecker verification preserves the historical policy/artifact barrier", async () => {
   const verify = await load("verify");
   const policy = (await load("no-comments")).steps[0]!;
   const policyIndex = verify.steps.findIndex(step => step.name === policy.name);
@@ -24,7 +24,7 @@ test("only a successful main push publishes an artifact after policy, tests and 
   expect(verify.steps[uploadIndex]!.when).toEqual([{ event: "push", branch: "main", status: "success" }]);
 });
 
-test("deployment is success-only, serialized and cannot publish without the exact artifact", async () => {
+test("archived Woodpecker deployment preserves the historical serialization and current-main checks", async () => {
   const deploy = await load("deploy");
   expect(deploy.when).toEqual([{ event: "push", branch: "main", status: "success" }]);
   expect(deploy.depends_on).toEqual(["verify", "no-comments"]);
@@ -44,4 +44,13 @@ test("deployment is success-only, serialized and cannot publish without the exac
   expect(cleanup).toBeGreaterThan(commands.findIndex(command => command.includes("wrangler secret put STEAM_VALUE_DB_TOKEN")));
   expect(cleanup).toBeLessThan(commands.lastIndexOf("bun ci/current-main.ts"));
   expect(cleanup).toBeLessThan(commands.findIndex(command => command.includes("wrangler deploy")));
+});
+
+test("Woodpecker configurations and bootstrap are documentation, not active entrypoints", async () => {
+  for (const name of ["verify", "deploy", "no-comments"]) {
+    expect(await Bun.file(new URL(`../.woodpecker/${name}.yaml`, import.meta.url)).exists()).toBe(false);
+    expect(await Bun.file(new URL(`../docs/ci/legacy-woodpecker/${name}.yaml`, import.meta.url)).exists()).toBe(true);
+  }
+  expect(await Bun.file(new URL("./bun.sh", import.meta.url)).exists()).toBe(false);
+  expect(await Bun.file(new URL("../docs/ci/legacy-woodpecker/bun.sh", import.meta.url)).exists()).toBe(true);
 });

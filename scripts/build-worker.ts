@@ -15,6 +15,8 @@ for (const file of htmlFiles) {
 }
 
 await cp("src/web/vendor/0build/0.6.13", "dist/assets/vendor/0build/0.6.13", { recursive: true });
+await cp("LICENSE", "dist/assets/LICENSE.txt");
+await cp("THIRD_PARTY_NOTICES.md", "dist/assets/THIRD_PARTY_NOTICES.txt");
 
 await buildOrExit(
   Bun.build({
