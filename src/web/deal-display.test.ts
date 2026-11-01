@@ -64,6 +64,40 @@ describe("deal display", () => {
     expect(html.match(/<a /g)).toHaveLength(2);
   });
 
+  test.each([
+    { name: "Steam retail with empty DRM", overrides: { id: "shop:61:https://shop.example/direct" }, qualifies: true },
+    { name: "third-party Steam key", overrides: { drm: ["Steam"] }, qualifies: true },
+    { name: "multiple explicit activations", overrides: { drm: ["GOG", "Steam"] }, qualifies: true },
+    { name: "confirmed Steam bundle", overrides: { kind: "bundle", drm: ["Steam"] }, qualifies: true },
+    { name: "GOG only", overrides: { drm: ["GOG"] }, qualifies: false },
+    { name: "unknown activation", overrides: {}, qualifies: false },
+    { name: "store name without identity", overrides: { store: "Steam" }, qualifies: false },
+    { name: "different shop ID", overrides: { id: "shop:610:https://shop.example/direct" }, qualifies: false },
+    { name: "bundle without activation", overrides: { kind: "bundle", store: "Steam", id: "shop:61:https://shop.example/bundle" }, qualifies: false },
+    { name: "similar DRM names", overrides: { drm: ["Steamworks", "Steam Deck"] }, qualifies: false },
+    { name: "Steam link without activation", overrides: { url: "https://store.steampowered.com/app/1", title: "Steam key" }, qualifies: false },
+  ] satisfies { name: string; overrides: Partial<DealOffer>; qualifies: boolean }[])("requires activation evidence: $name", ({ overrides, qualifies }) => {
+    const data = deals({ offers: [offer(overrides)] });
+    expect(activeOffers(data, now, true)).toHaveLength(qualifies ? 1 : 0);
+    expect(activeOffers(data, now, false)).toHaveLength(1);
+    expect(activeOffers(data, now + 600, true)).toEqual([]);
+  });
+
+  test("selects the cheapest Steam offer instead of cheaper GOG or unverified bundles", () => {
+    const data = deals({ offers: [
+      offer({ id: "gog", drm: ["GOG"], priceCents: 100, discountPercent: 90, url: "https://shop.example/gog" }),
+      offer({ id: "expensive-key", drm: ["Steam"], priceCents: 700, discountPercent: 30 }),
+      offer({ id: "key", drm: ["Steam"], priceCents: 400 }),
+      offer({ id: "unknown-bundle", kind: "bundle" }),
+    ] });
+    const html = renderDeals(data, now, true);
+    expect(displayText(html)).toBe("60% off");
+    expect(html).toContain('href="https://shop.example/game?affiliate=itad&amp;voucher=SAVE%2020"');
+    expect(html).not.toContain("https://shop.example/gog");
+    expect(displayText(renderDeals(data, now))).toBe("90% off In bundle");
+    expect(displayText(renderDeals(deals(), now, true))).toBe("—");
+  });
+
   test("does not invent a percentage when the retail discount is missing", () => {
     const html = renderDeals(deals({ offers: [offer({ discountPercent: null })] }), now);
     expect(displayText(html)).toBe("—");
@@ -169,6 +203,46 @@ describe("mocked frontend behavior", () => {
     });
   }
 
+  for (const width of [1440, 390, 320]) {
+    test(`Steam activation filter works independently by keyboard at ${width}px`, async () => {
+      const requests: URLSearchParams[] = [];
+      const gog = offer({ id: "gog", drm: ["GOG"], priceCents: 100, discountPercent: 90, url: "https://shop.example/gog" });
+      const steam = offer({ id: "steam-key", drm: ["Steam"], priceCents: 400 });
+      const bundle = offer({ id: "unknown-bundle", kind: "bundle" });
+      await withPage(async (route, url) => {
+        requests.push(url.searchParams);
+        await route.fulfill({ json: [game(1, deals({ offers: [gog, steam, bundle] })), game(2, deals({ offers: [gog] }))] });
+      }, async (page) => {
+        const root = page.locator(width > 900 ? "#games-list" : "#games-cards");
+        await root.getByRole("link", { name: "90% off" }).first().waitFor();
+        const filter = page.getByRole("checkbox", { name: "Activates on Steam only", exact: true });
+        expect(await filter.isChecked()).toBe(false);
+        expect(await page.locator("#on-sale").isChecked()).toBe(false);
+        expect(requests.at(-1)!.has("steamOnly")).toBe(false);
+        expect(await filter.locator("..").evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44);
+        expect(await textContrast(page, "label:has(#steam-only)")).toBeGreaterThanOrEqual(4.5);
+        await filter.focus();
+        expect(await filter.evaluate((element) => getComputedStyle(element).outlineWidth)).not.toBe("0px");
+        const filtered = page.waitForResponse((res) => new URL(res.url()).searchParams.get("steamOnly") === "true");
+        await page.keyboard.press("Space");
+        await filtered;
+        await root.getByRole("link", { name: "60% off" }).waitFor();
+        expect(await page.locator("#on-sale").isChecked()).toBe(false);
+        expect(Object.fromEntries(requests.at(-1)!)).toEqual({ steamOnly: "true", hideIgnored: "true", limit: "100", offset: "0" });
+        expect(await root.getByRole("link", { name: "Game 2", exact: true }).count()).toBe(0);
+        expect(await root.getByRole("link", { name: "In bundle" }).count()).toBe(0);
+        expect(await root.getByRole("link", { name: "90% off" }).count()).toBe(0);
+        expect(await root.getByRole("link", { name: "60% off" }).getAttribute("href")).toBe(steam.url);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        await filter.uncheck();
+        await root.getByRole("link", { name: "90% off" }).first().waitFor();
+        expect(await root.getByRole("link", { name: "Game 2", exact: true }).count()).toBe(1);
+        expect(await root.getByRole("link", { name: "In bundle" }).count()).toBe(1);
+        expect(requests.at(-1)!.has("steamOnly")).toBe(false);
+      }, { width });
+    });
+  }
+
   test("uses local 0build styles and keyboard-operated native filters", async () => {
     await withPage(async (route) => route.fulfill({ json: [game(1)] }), async (page) => {
       await page.locator("#games-list tr").waitFor();
@@ -225,11 +299,13 @@ describe("mocked frontend behavior", () => {
     await withPage(async (route, url) => {
       requests.push(url.searchParams);
       const offset = Number(url.searchParams.get("offset"));
-      const games = offset === 0 ? Array.from({ length: 100 }, (_, index) => game(index + 1)) : [game(101)];
+      const steamDeals = deals({ offers: [offer({ drm: ["Steam"] })] });
+      const games = offset === 0 ? Array.from({ length: 100 }, (_, index) => game(index + 1, steamDeals)) : [game(101, steamDeals)];
       await route.fulfill({ json: games });
     }, async (page) => {
       await page.waitForFunction(() => document.querySelectorAll("#games-list tr").length === 100);
       await page.locator("#on-sale").check();
+      await page.locator("#steam-only").check();
       await page.locator("#hide-ea").check();
       await page.locator("#hide-played").check();
       await page.locator("#hide-mmo").check();
@@ -237,7 +313,7 @@ describe("mocked frontend behavior", () => {
       await page.locator("#coop-filter").selectOption("online-coop");
       await page.locator("#controller-filter").selectOption("full");
       await page.waitForFunction(() => document.querySelectorAll("#games-list tr").length === 100 && !document.querySelector<HTMLButtonElement>("#load-more")!.disabled);
-      const expected = { onSale: "true", hideEa: "true", hidePlayed: "true", hideMMO: "true", hideIgnored: "true", singleOnly: "true", coop: "online-coop", controller: "full", limit: "100", offset: "0" };
+      const expected = { onSale: "true", steamOnly: "true", hideEa: "true", hidePlayed: "true", hideMMO: "true", hideIgnored: "true", singleOnly: "true", coop: "online-coop", controller: "full", limit: "100", offset: "0" };
       expect(Object.fromEntries(requests.at(-1)!)).toEqual(expected);
       await page.locator("#load-more").click();
       await page.waitForFunction(() => document.querySelectorAll("#games-list tr").length === 101);
@@ -246,6 +322,12 @@ describe("mocked frontend behavior", () => {
       await page.locator("#on-sale").uncheck();
       await page.waitForFunction(() => document.querySelectorAll("#games-list tr").length === 100);
       expect(requests.at(-1)!.has("onSale")).toBe(false);
+      expect(requests.at(-1)!.get("steamOnly")).toBe("true");
+      await page.locator("#load-more").click();
+      await page.waitForFunction(() => document.querySelectorAll("#games-list tr").length === 101);
+      await page.locator("#steam-only").uncheck();
+      await page.waitForFunction(() => document.querySelectorAll("#games-list tr").length === 100);
+      expect(requests.at(-1)!.has("steamOnly")).toBe(false);
       expect(requests.at(-1)!.get("offset")).toBe("0");
       expect(requests.at(-1)!.get("coop")).toBe("online-coop");
     });
@@ -303,6 +385,35 @@ describe("mocked frontend behavior", () => {
       await page.clock.runFor(120_000);
       await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
       expect(calls).toBe(before);
+    });
+  });
+
+  test("Steam-only expiry resets pagination and explains empty results despite a current non-Steam offer", async () => {
+    let calls = 0;
+    await withPage(async (route) => {
+      calls++;
+      await route.fulfill({ json: [game(1, deals({ offers: [
+        offer({ id: "steam-key", drm: ["Steam"], validUntil: now + 10 }),
+        offer({ id: "gog", drm: ["GOG"], validUntil: now + 600 }),
+      ] }))] });
+    }, async (page) => {
+      await page.waitForSelector("#games-list tr");
+      await page.locator("#steam-only").check();
+      await page.waitForSelector("#games-list tr");
+      expect(calls).toBe(2);
+      await page.clock.setSystemTime((now + 20) * 1000);
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await page.locator("#games-empty").waitFor();
+      expect(await page.locator("#games-list tr").count()).toBe(0);
+      expect(await page.locator("#games-empty").innerText()).toContain("Steam-activating");
+      expect(await page.locator("#games-empty").innerText()).toContain("unconfirmed activation");
+      expect(calls).toBe(3);
+      await page.clock.runFor(120_000);
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      expect(calls).toBe(3);
+      await page.locator("#steam-only").uncheck();
+      await page.locator("#games-list .deal-badge").waitFor();
+      expect(await page.locator("#games-empty").isVisible()).toBe(false);
     });
   });
 

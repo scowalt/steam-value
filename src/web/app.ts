@@ -36,6 +36,7 @@ const syncStatus = document.getElementById("sync-status")!;
 const gamesError = document.getElementById("games-error")!;
 const emptyMessage = document.getElementById("games-empty")!;
 const onSaleCheckbox = document.getElementById("on-sale") as HTMLInputElement;
+const steamOnlyCheckbox = document.getElementById("steam-only") as HTMLInputElement;
 const hideEaCheckbox = document.getElementById("hide-ea") as HTMLInputElement;
 const hidePlayedCheckbox = document.getElementById("hide-played") as HTMLInputElement;
 const hideMMOCheckbox = document.getElementById("hide-mmo") as HTMLInputElement;
@@ -68,6 +69,7 @@ interface SyncState {
 function getFilterParams(): URLSearchParams {
   const params = new URLSearchParams();
   if (onSaleCheckbox.checked) params.set("onSale", "true");
+  if (steamOnlyCheckbox.checked) params.set("steamOnly", "true");
   if (hideEaCheckbox.checked) params.set("hideEa", "true");
   if (hidePlayedCheckbox.checked) params.set("hidePlayed", "true");
   if (hideMMOCheckbox.checked) params.set("hideMMO", "true");
@@ -139,19 +141,23 @@ function resetAndLoad() {
 }
 
 function visibleGames(now: number): Game[] {
-  return onSaleCheckbox.checked ? allGames.filter((game) => activeOffers(game.deals, now).length > 0) : allGames;
+  return onSaleCheckbox.checked || steamOnlyCheckbox.checked
+    ? allGames.filter((game) => activeOffers(game.deals, now, steamOnlyCheckbox.checked).length > 0)
+    : allGames;
 }
 
 function renderEmptyState() {
   emptyMessage.hidden = Boolean(gamesRequest) || gamesLoadFailed || visibleGames(Date.now() / 1000).length > 0;
-  emptyMessage.textContent = onSaleCheckbox.checked
-    ? "No games with current discounts or bundles match these filters. Missing, stale or unmatched sale data does not qualify; try disabling On sale or in bundle."
-    : "No games match these filters.";
+  emptyMessage.textContent = steamOnlyCheckbox.checked
+    ? "No games with current Steam-activating deals match these filters. Non-Steam and unconfirmed activation offers are excluded; try disabling Activates on Steam only."
+    : onSaleCheckbox.checked
+      ? "No games with current discounts or bundles match these filters. Missing, stale or unmatched sale data does not qualify; try disabling On sale or in bundle."
+      : "No games match these filters.";
 }
 
 function updateNextExpiry() {
   const now = Date.now() / 1000;
-  const deadlines = allGames.map((game) => nextDealChange(game.deals, now))
+  const deadlines = allGames.map((game) => nextDealChange(game.deals, now, steamOnlyCheckbox.checked))
     .filter((deadline): deadline is number => deadline !== null);
   nextExpiry = deadlines.length ? Math.min(...deadlines) : null;
 }
@@ -159,7 +165,7 @@ function updateNextExpiry() {
 function checkDealExpiry() {
   if (nextExpiry === null || nextExpiry > Date.now() / 1000) return;
   updateNextExpiry();
-  if (onSaleCheckbox.checked) {
+  if (onSaleCheckbox.checked || steamOnlyCheckbox.checked) {
     resetAndLoad();
   } else {
     renderGames();
@@ -176,7 +182,7 @@ function renderGames() {
   const now = Date.now() / 1000;
   const checkIcon = '<svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
   visibleGames(now).forEach((game, i) => {
-    const dealsHtml = renderDeals(game.deals, now);
+    const dealsHtml = renderDeals(game.deals, now, steamOnlyCheckbox.checked);
     const rank = i + 1;
     const tr = document.createElement("tr");
 
@@ -320,6 +326,7 @@ function formatUnixTime(value: number): string {
 
 loadMoreBtn.addEventListener("click", loadGames);
 onSaleCheckbox.addEventListener("change", resetAndLoad);
+steamOnlyCheckbox.addEventListener("change", resetAndLoad);
 hideEaCheckbox.addEventListener("change", resetAndLoad);
 hidePlayedCheckbox.addEventListener("change", resetAndLoad);
 hideMMOCheckbox.addEventListener("change", resetAndLoad);

@@ -101,6 +101,8 @@ The viewer retains Value Score/review/time ranking, filters for early access/pla
 
 **On sale or in bundle** combines with existing filters before pagination. The Deals column shows linked retail % off/bundle badges (mobile compact fields) and footer attribution. A dash means no usable offer, not proof no sale exists. Offers expire strictly at 24 hours or earlier provider expiration; open tabs also expire badges. Successful empty responses remove disappeared sales; missing/failed responses never renew freshness. Country/kind caches, seven-day mappings and renewable token-fenced leases remain distinct from Steam Status and Value Score.
 
+**Activates on Steam only** is an opt-in filter for current Steam-activating deals, whether or not **On sale or in bundle** is also checked. It includes Steam-store discounts (provider shop ID 61, even with empty DRM metadata) and third-party offers explicitly marked with Steam DRM. GOG-only, other non-Steam and unconfirmed activation offers are excluded; current bundle data lacks per-game activation evidence, so those bundles are hidden too. Qualification happens before pagination and before choosing the cheapest displayed retail offer, so a cheaper GOG deal cannot hide an eligible Steam key. Turning the filter off restores broader offers without changing the cache or other filters. Existing defaults are unchanged.
+
 Check provider terms for activation/DRM, vouchers and bundle choice/add-on conditions. Affiliate links remain unchanged. This is not an affiliated ITAD product or an availability guarantee. See [ITAD research](docs/research/isthereanydeal-sale-data.md) and the [devinabox runbook](deploy/devinabox/README.md).
 
 ## Scheduled and historical tools

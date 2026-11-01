@@ -1,3 +1,4 @@
+import { activatesOnSteam } from "../services/deal-activation";
 import {
   DEAL_MAX_AGE_SECONDS,
   type DealOffer,
@@ -13,13 +14,13 @@ export function escapeHtml(text: string): string {
   });
 }
 
-export function activeOffers(deals: GameDeals | undefined, now: number): DealOffer[] {
-  return (deals?.offers ?? []).filter((offer) => Number.isFinite(offer.validUntil) && offer.validUntil > now);
+export function activeOffers(deals: GameDeals | undefined, now: number, steamOnly = false): DealOffer[] {
+  return (deals?.offers ?? []).filter((offer) => Number.isFinite(offer.validUntil) && offer.validUntil > now && (!steamOnly || activatesOnSteam(offer)));
 }
 
-export function nextDealChange(deals: GameDeals | undefined, now: number): number | null {
+export function nextDealChange(deals: GameDeals | undefined, now: number, steamOnly = false): number | null {
   if (!deals) return null;
-  const deadlines = activeOffers(deals, now).map((offer) => offer.validUntil);
+  const deadlines = activeOffers(deals, now, steamOnly).map((offer) => offer.validUntil);
   if ((deals.status === "fresh" || deals.status === "partial") && deals.checkedAt !== null) {
     deadlines.push(deals.checkedAt + DEAL_MAX_AGE_SECONDS);
   }
@@ -38,8 +39,8 @@ function offerLink(offer: DealOffer, label: string): string {
   return escapeHtml(label);
 }
 
-export function renderDeals(deals: GameDeals | undefined, now: number): string {
-  const offers = activeOffers(deals, now);
+export function renderDeals(deals: GameDeals | undefined, now: number, steamOnly = false): string {
+  const offers = activeOffers(deals, now, steamOnly);
   const retail = offers.filter((offer) => offer.kind === "retail")
     .sort((a, b) => (a.priceCents ?? Infinity) - (b.priceCents ?? Infinity))[0];
   const bundle = offers.find((offer) => offer.kind === "bundle");

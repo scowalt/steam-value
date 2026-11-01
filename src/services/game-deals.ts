@@ -1,20 +1,27 @@
 import { DB_LIMITS, type DbClient, type DbStatement, type DbValue } from "../db/access";
+import { activatesOnSteam } from "./deal-activation";
 import { DEAL_COUNTRY, DEAL_MAX_AGE_SECONDS, type DealOffer, type DealRefreshStatus, type GameDeals } from "./deal-types";
 
 export { DEAL_COUNTRY, DEAL_MAX_AGE_SECONDS } from "./deal-types";
 export type { DealOffer, DealRefreshStatus, GameDeals } from "./deal-types";
 
-export const ON_SALE_SQL = `EXISTS (
-  SELECT 1 FROM game_deal_cache dc, json_each(dc.offers_json) offer
-  WHERE dc.steam_app_id = games.steam_app_id AND dc.country = ?
-    AND dc.checked_at > ? AND json_extract(offer.value, '$.validUntil') > ?
-)`;
+export function onSaleSql(steamOnly = false): string {
+  return `EXISTS (
+    SELECT 1 FROM game_deal_cache dc, json_each(dc.offers_json) offer
+    WHERE dc.steam_app_id = games.steam_app_id AND dc.country = ?
+      AND dc.checked_at > ? AND json_extract(offer.value, '$.validUntil') > ?
+      ${steamOnly ? `AND (
+        (json_extract(offer.value, '$.kind') = 'retail' AND substr(json_extract(offer.value, '$.id'), 1, 8) = 'shop:61:')
+        OR EXISTS (SELECT 1 FROM json_each(offer.value, '$.drm') drm WHERE drm.value = 'Steam')
+      )` : ""}
+  )`;
+}
 
 export function onSaleArgs(now: number): DbValue[] {
   return [DEAL_COUNTRY, now - DEAL_MAX_AGE_SECONDS, now];
 }
 
-export async function getGameDeals(client: DbClient, appIds: number[], now = unixNow()): Promise<Map<number, GameDeals>> {
+export async function getGameDeals(client: DbClient, appIds: number[], now = unixNow(), steamOnly = false): Promise<Map<number, GameDeals>> {
   const result = new Map<number, GameDeals>(appIds.map((id) => [id, { status: "unknown", checkedAt: null, offers: [] }]));
   if (!appIds.length) return result;
   const statements: DbStatement[] = [];
@@ -40,7 +47,7 @@ export async function getGameDeals(client: DbClient, appIds: number[], now = uni
     const offers = JSON.parse(String(row.offers_json)) as DealOffer[];
     const id = Number(row.steam_app_id);
     const entries = scopes.get(id) ?? [];
-    entries.push({ checkedAt, fresh, offers: fresh ? offers.filter((offer) => offer.validUntil > now) : [] });
+    entries.push({ checkedAt, fresh, offers: fresh ? offers.filter((offer) => offer.validUntil > now && (!steamOnly || activatesOnSteam(offer))) : [] });
     scopes.set(id, entries);
   }
   for (const [id, entries] of scopes) {
