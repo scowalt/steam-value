@@ -1,4 +1,5 @@
 import { checkCurrentMain } from "./current-main";
+import { checkedProductionIdentity } from "./context";
 
 const retired = ["TURSO_AUTH_TOKEN", "TURSO_DATABASE_URL"];
 const application = "STEAM_VALUE_DB_TOKEN";
@@ -49,10 +50,7 @@ export async function retireLegacyWorkerSecrets(options: CleanupOptions): Promis
 }
 
 if (import.meta.main) {
-  if (process.env.CI_REPO !== "scowalt/steam-value" || process.env.CI_PIPELINE_EVENT !== "push" || process.env.CI_COMMIT_REF !== "refs/heads/main") throw new Error("Worker cleanup requires a main push");
-  const head = Bun.spawn(["git", "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
-  const [sha, , code] = await Promise.all([new Response(head.stdout).text(), new Response(head.stderr).text(), head.exited]);
-  if (code !== 0 || sha.trim() !== process.env.CI_COMMIT_SHA) throw new Error("Worker cleanup checkout differs");
+  checkedProductionIdentity();
   const removed = await retireLegacyWorkerSecrets({ accountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? "", apiToken: process.env.CLOUDFLARE_API_TOKEN ?? "", assertCurrentMain: checkCurrentMain });
   console.log(removed.length ? `Retired Worker secret names: ${removed.join(", ")}` : "No retired Worker secret names remain");
 }

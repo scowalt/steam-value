@@ -1,4 +1,6 @@
-# Steam Value CI on Woodpecker
+# Historical Steam Value CI on Woodpecker
+
+This records the controller used by remote main before the approved GitHub migration. The target is the public GitHub repository for all development and GitHub-hosted Actions for all CI/CD, not a hybrid. This patch preserves the [old configurations/bootstrap](legacy-woodpecker/) as documentation only and removes their active paths. Follow the [Actions handoff](github-actions.md) before delivering it; no hosted retirement or deployment is authorized by this source change. The instructions below describe the old arrangement, not how to activate a second controller.
 
 Use the existing [Woodpecker service](https://woodpecker.scowalt.com) on native Linux x86-64. [ADR 0006](../adr/0006-run-ci-and-tested-artifact-deployment-on-woodpecker.md) records the owner-approved provider change. The source reuses the previously reviewed local artifact/current-main helpers, adapted to the current D1 release and x86 runner; it does not adopt the old pre-D1 application tree or ARM-only bootstrap.
 

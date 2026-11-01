@@ -1,7 +1,8 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { checkedProductionIdentity, validateIdentity, type Identity } from "./context";
 
-export interface Identity { repository: string; run: string; commit: string }
+export type { Identity } from "./context";
 interface Entry { path: string; content: string; sha256: string }
 interface Artifact { version: number; identity: Identity; created: number; expires: number; files: Entry[] }
 export interface ArtifactStore { put(key: string, text: string): Promise<void>; get(key: string): Promise<string> }
@@ -9,9 +10,8 @@ const lifetime = 7 * 24 * 60 * 60;
 const digest = (bytes: Uint8Array) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 
 export function artifactKey(identity: Identity) {
-  if (identity.repository !== "scowalt/steam-value" || !/^[1-9][0-9]*$/.test(identity.run) ||
-      !/^[a-f0-9]{40}$/.test(identity.commit)) throw new Error("Invalid artifact identity");
-  return `steam-value/${identity.run}/${identity.commit}.json`;
+  validateIdentity(identity);
+  return `steam-value/github-actions/${identity.run}/${identity.attempt}/${identity.commit}.json`;
 }
 
 export async function transferArtifact(action: "upload" | "download", store: ArtifactStore, directory: string, identity: Identity, now: number) {
@@ -28,6 +28,7 @@ export async function transferArtifact(action: "upload" | "download", store: Art
 }
 
 export async function createArtifact(directory: string, identity: Identity, now: number): Promise<string> {
+  validateIdentity(identity);
   const files: Entry[] = [];
   async function visit(prefix: string) {
     for (const entry of await readdir(join(directory, prefix), { withFileTypes: true })) {
@@ -43,13 +44,12 @@ export async function createArtifact(directory: string, identity: Identity, now:
   }
   await visit("");
   if (!files.length) throw new Error("Empty artifact output");
-  return JSON.stringify({ version: 1, identity, created: now, expires: now + lifetime, files } satisfies Artifact);
+  return JSON.stringify({ version: 2, identity, created: now, expires: now + lifetime, files } satisfies Artifact);
 }
 
 export async function restoreArtifact(text: string, directory: string, identity: Identity, now: number) {
   const artifact: Artifact = JSON.parse(text);
-  if (artifact.version !== 1 || artifact.identity.repository !== identity.repository ||
-      artifact.identity.run !== identity.run || artifact.identity.commit !== identity.commit ||
+  if (artifact.version !== 2 || artifactKey(artifact.identity) !== artifactKey(identity) ||
       !Number.isSafeInteger(artifact.created) || artifact.expires !== artifact.created + lifetime ||
       now < artifact.created || now >= artifact.expires) throw new Error("Artifact identity or lifetime mismatch");
   if (!Array.isArray(artifact.files) || !artifact.files.length) throw new Error("Empty artifact");
@@ -81,13 +81,7 @@ export async function restoreArtifact(text: string, directory: string, identity:
 if (import.meta.main) {
   const action = process.argv[2];
   if (action !== "upload" && action !== "download") throw new Error("Expected upload or download");
-  if (process.env.CI_PIPELINE_EVENT !== "push" || process.env.CI_COMMIT_REF !== "refs/heads/main") {
-    throw new Error("Production artifacts are restricted to main pushes");
-  }
-  const identity = { repository: process.env.CI_REPO ?? "", run: process.env.CI_PIPELINE_NUMBER ?? "", commit: process.env.CI_COMMIT_SHA ?? "" };
-  artifactKey(identity);
-  const head = Bun.spawnSync(["git", "rev-parse", "HEAD"]);
-  if (head.exitCode !== 0 || head.stdout.toString().trim() !== identity.commit) throw new Error("Checkout identity mismatch");
+  const identity = checkedProductionIdentity();
   const required = (name: string) => {
     const value = process.env[name];
     if (!value) throw new Error(`Missing ${name} binding`);

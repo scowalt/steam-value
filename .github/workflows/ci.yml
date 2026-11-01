@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -15,24 +19,93 @@ concurrency:
 jobs:
   verify:
     name: Test, typecheck, and build
-    runs-on: ubuntu-latest
+    if: >-
+      ${{ !(github.repository == 'scowalt/steam-value' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STEAM_VALUE_RELEASE_CONTROLLER == 'github-actions') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v3
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
-      - name: Test
-        run: bun test
-      - name: Typecheck and build
-        run: bun run build
-      - name: Preserve tested deployment artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          name: worker-${{ github.sha }}
-          path: dist
-          if-no-files-found: error
-          retention-days: 7
+          persist-credentials: false
+      - uses: ./.github/actions/verify
+
+  verify-main:
+    name: Verify and retain current main
+    if: >-
+      ${{ github.repository == 'scowalt/steam-value' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STEAM_VALUE_RELEASE_CONTROLLER == 'github-actions' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: artifact-publication
+    env:
+      STEAM_VALUE_RELEASE_CONTROLLER: ${{ vars.STEAM_VALUE_RELEASE_CONTROLLER }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/verify
+      - name: Reject stale main before retaining output
+        env:
+          STEAM_VALUE_CONTENTS_READ_TOKEN: ${{ github.token }}
+        run: bun --no-env-file ci/current-main.ts
+      - name: Preserve the exact tested artifact in private R2
+        env:
+          STEAM_VALUE_ARTIFACT_ENDPOINT: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_ENDPOINT }}
+          STEAM_VALUE_ARTIFACT_BUCKET: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_BUCKET }}
+          STEAM_VALUE_ARTIFACT_REGION: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_REGION }}
+          STEAM_VALUE_ARTIFACT_ACCESS_KEY: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_WRITE_ACCESS_KEY }}
+          STEAM_VALUE_ARTIFACT_SECRET_KEY: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_WRITE_SECRET_KEY }}
+        run: bun --no-env-file ci/artifact.ts upload
+
+  deploy:
+    name: Deploy tested current main
+    needs: verify-main
+    if: >-
+      ${{ github.repository == 'scowalt/steam-value' && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STEAM_VALUE_RELEASE_CONTROLLER == 'github-actions' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    env:
+      STEAM_VALUE_RELEASE_CONTROLLER: ${{ vars.STEAM_VALUE_RELEASE_CONTROLLER }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.20.0'
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db
+        with:
+          cache: false
+          env: false
+      - name: Reject stale main before installing deployment dependencies
+        env:
+          STEAM_VALUE_CONTENTS_READ_TOKEN: ${{ github.token }}
+        run: bun --no-env-file ci/current-main.ts
+      - name: Install deployment dependencies without rebuilding
+        run: bun --no-env-file install --frozen-lockfile
+      - name: Restore this run and attempt's tested artifact
+        env:
+          STEAM_VALUE_ARTIFACT_ENDPOINT: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_ENDPOINT }}
+          STEAM_VALUE_ARTIFACT_BUCKET: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_BUCKET }}
+          STEAM_VALUE_ARTIFACT_REGION: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_REGION }}
+          STEAM_VALUE_ARTIFACT_ACCESS_KEY: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_READ_ACCESS_KEY }}
+          STEAM_VALUE_ARTIFACT_SECRET_KEY: ${{ secrets.STEAM_VALUE_CI_ARTIFACT_READ_SECRET_KEY }}
+        run: bun --no-env-file ci/artifact.ts download
+      - name: Deploy tested current main
+        env:
+          STEAM_VALUE_CONTENTS_READ_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          STEAM_VALUE_DB_TOKEN: ${{ secrets.STEAM_VALUE_DB_TOKEN }}
+        run: |
+          bun --no-env-file ci/current-main.ts
+          test -n "$STEAM_VALUE_DB_TOKEN"
+          printf '%s' "$STEAM_VALUE_DB_TOKEN" | bun --no-env-file x --no-install wrangler secret put STEAM_VALUE_DB_TOKEN --name steam-value
+          bun --no-env-file ci/retired-secrets.ts
+          bun --no-env-file ci/current-main.ts
+          bun --no-env-file x --no-install wrangler deploy --no-bundle --strict --keep-vars --message "GitHub commit $GITHUB_SHA" --tag "$GITHUB_SHA"
