@@ -1,6 +1,6 @@
 # Contributing
 
-The canonical development home is [scowalt/steam-value on GitHub](https://github.com/scowalt/steam-value): use its [issues](https://github.com/scowalt/steam-value/issues) for bugs/proposals and pull requests for changes. GitHub-hosted Actions is the target for all CI and CD; there is no separate private development or Woodpecker contribution lane. Hosted activation/publication follows the separately approved [handoff](docs/ci/github-actions.md).
+The canonical development home is [scowalt/steam-value on GitHub](https://github.com/scowalt/steam-value): use its [issues](https://github.com/scowalt/steam-value/issues) for bugs/proposals and pull requests for changes. GitHub-hosted Actions runs all CI and CD; there is no separate private development or Woodpecker contribution lane. The [Actions runbook](docs/ci/github-actions.md) records the completed handoff and current release safeguards.
 
 ## Isolated development
 
