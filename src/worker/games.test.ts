@@ -73,6 +73,22 @@ describe("rankings with ITAD offers", () => {
     expect((await getGameDeals(client, [3], start + 86400)).get(3)?.status).toBe("stale");
   });
 
+  test("Steam-only qualification honors expiry even when non-Steam offers remain current", async () => {
+    const steam = { ...offer("retail", start + 60), drm: ["Steam"] };
+    const gog = { ...offer("retail"), id: "gog", drm: ["GOG"] };
+    const direct = { ...offer("retail"), id: "shop:61:https://shop.example/direct" };
+    await run(source({ prices: async () => new Map([
+      [gid(1), []], [gid(2), [steam, gog]], [gid(3), [direct]], [gid(4), []],
+    ]) }));
+    expect((await listGames(client, query("steamOnly=true"), start + 59)).map((g) => g.id)).toEqual([2, 3]);
+    expect((await listGames(client, query("steamOnly=true"), start + 60)).map((g) => g.id)).toEqual([3]);
+    expect((await listGames(client, query("onSale=true"), start + 60)).map((g) => g.id)).toEqual([2, 3]);
+    expect((await listGames(client, query("steamOnly=true"), start + 86399)).map((g) => g.id)).toEqual([3]);
+    expect(await listGames(client, query("steamOnly=true"), start + 86400)).toEqual([]);
+    await client.execute({ sql: "UPDATE game_deal_cache SET checked_at=? WHERE steam_app_id=3 AND kind='retail'", args: [start - 86400] });
+    expect(await listGames(client, query("steamOnly=true"), start + 60)).toEqual([]);
+  });
+
   test("does not turn missing or failed responses into fresh retail data", async () => {
     await run();
     now = start + 86400;
@@ -258,6 +274,56 @@ describe("native D1 viewer requests", () => {
       country: "US", currency: "USD", maxAgeSeconds: 86400, lastAttemptAt: null, lastSuccessAt: null,
       lastError: null, isRunning: false, gamesChecked: 0, totalGames: 6, freshGames: 2,
     });
+  });
+
+  test("filters Steam activation before pagination and returns only qualifying offers without changing the cache", async () => {
+    const checkedAt = Math.floor(Date.now() / 1000);
+    const gog = { ...offer("retail", checkedAt + 3600), id: "shop:35:https://shop.example/gog", store: "GOG", drm: ["GOG"], priceCents: 100 };
+    const steamKey = { ...gog, id: "shop:6:https://shop.example/key", store: "Key store", drm: ["Steam"], priceCents: 300, url: "https://shop.example/key?affiliate=unchanged", voucher: "SAVE" };
+    const expensiveKey = { ...steamKey, id: "shop:6:https://shop.example/expensive", priceCents: 600 };
+    const direct = { ...gog, id: "shop:61:https://shop.example/direct", store: "Steam", drm: [] };
+    const unknownBundle = { ...offer("bundle", checkedAt + 3600), store: "Steam" };
+    const cases: DealOffer[][] = [
+      [gog],
+      [gog, expensiveKey, steamKey, unknownBundle],
+      [direct],
+      [unknownBundle],
+      [{ ...gog, store: "Steam", drm: [] }],
+      [{ ...direct, id: "shop:610:https://shop.example/other" }],
+      [{ ...gog, drm: ["Steamworks", "Steam Deck"] }],
+      [{ ...unknownBundle, id: "shop:61:https://shop.example/not-retail" }],
+      [{ ...steamKey, drm: ["GOG", "Steam"] }],
+      [{ ...unknownBundle, drm: ["Steam"] }],
+      [],
+    ];
+    await seed(cases.flatMap((offers, index) => [
+      { sql: "INSERT INTO games (id, steam_app_id, name, value_score) VALUES (?, ?, ?, ?)", args: [index + 1, index + 1, `Activation ${index + 1}`, 1000 - index] },
+      ...["retail", "bundle"].map((kind) => ({
+        sql: "INSERT INTO game_deal_cache VALUES (?, 'US', ?, ?, ?)",
+        args: [index + 1, kind, checkedAt, JSON.stringify(offers.filter((item) => item.kind === kind))],
+      })),
+    ]));
+    const baseline = await browse();
+    expect(baseline.map((game) => game.id)).toEqual(cases.map((_, index) => index + 1));
+    expect(await browse("steamOnly=false")).toEqual(baseline);
+    expect(await browse("steamOnly=1")).toEqual(baseline);
+    expect((await browse("onSale=true")).map((game) => game.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const filtered = await browse("steamOnly=true");
+    expect(filtered.map((game) => game.id)).toEqual([2, 3, 9, 10]);
+    expect(filtered[0]?.deals.offers).toEqual([steamKey, expensiveKey]);
+    expect(filtered[1]?.deals.offers).toEqual([direct]);
+    expect(filtered[3]?.deals.offers).toEqual([{ ...unknownBundle, drm: ["Steam"] }]);
+    expect(await browse("onSale=true&steamOnly=true")).toEqual(filtered);
+    expect((await browse("steamOnly=true&limit=1")).map((game) => game.id)).toEqual([2]);
+    expect((await browse("steamOnly=true&limit=1&offset=1")).map((game) => game.id)).toEqual([3]);
+    expect(await browse("steamOnly=true&offset=4")).toEqual([]);
+    expect(await browse()).toEqual(baseline);
+    await client.batch([
+      "UPDATE games SET is_ignored=1, is_early_access=1, playtime_minutes=20, is_mmo=1 WHERE id=2",
+      "UPDATE games SET has_single_player=1, has_online_co_op=1, controller_support='full' WHERE id=3",
+    ]);
+    const combined = "steamOnly=true&hideIgnored=true&hideEa=true&hidePlayed=true&hideMMO=true&singleOnly=true&coop=online-coop&controller=full";
+    expect((await browse(combined)).map((game) => game.id)).toEqual([3]);
   });
 
   test("preserves human Steam Status and deal-state DTOs without machine credentials", async () => {

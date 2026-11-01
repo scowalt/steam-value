@@ -1,5 +1,5 @@
 import type { DbClient, DbValue } from "../db/access";
-import { getGameDeals, ON_SALE_SQL, onSaleArgs, unixNow, type GameDeals } from "../services/game-deals";
+import { getGameDeals, onSaleSql, onSaleArgs, unixNow, type GameDeals } from "../services/game-deals";
 
 export interface GameDto {
   deals: GameDeals;
@@ -51,6 +51,7 @@ export interface CityBuilderGameDto {
 
 export interface GameQueryParams {
   onSale: boolean;
+  steamOnly: boolean;
   limit: number;
   offset: number;
   hideEa: boolean;
@@ -65,6 +66,7 @@ export interface GameQueryParams {
 export function parseGameQuery(url: URL): GameQueryParams {
   return {
     onSale: url.searchParams.get("onSale") === "true",
+    steamOnly: url.searchParams.get("steamOnly") === "true",
     limit: clampInteger(url.searchParams.get("limit"), 100, 1, 500),
     offset: clampInteger(url.searchParams.get("offset"), 0, 0, 100_000),
     hideEa: url.searchParams.get("hideEa") === "true",
@@ -80,8 +82,8 @@ export function parseGameQuery(url: URL): GameQueryParams {
 export async function listGames(client: DbClient, params: GameQueryParams, now = unixNow()): Promise<GameDto[]> {
   const conditions = ["value_score IS NOT NULL", "is_endless = 0"];
   const args: DbValue[] = [];
-  if (params.onSale) {
-    conditions.push(ON_SALE_SQL);
+  if (params.onSale || params.steamOnly) {
+    conditions.push(onSaleSql(params.steamOnly));
     args.push(...onSaleArgs(now));
   }
 
@@ -153,7 +155,7 @@ export async function listGames(client: DbClient, params: GameQueryParams, now =
     args,
   });
 
-  const deals = await getGameDeals(client, result.rows.map((row) => Number(row.steam_app_id)), now);
+  const deals = await getGameDeals(client, result.rows.map((row) => Number(row.steam_app_id)), now, params.steamOnly);
   return result.rows.map((row) => ({ ...mapGameRow(row), deals: deals.get(Number(row.steam_app_id))! }));
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ItadClient } from "./itad-client";
+import { activatesOnSteam } from "./deal-activation";
 
 const now = 1_800_000_000;
 const id = "018d937f-21e1-728e-86d7-9acb3c59f2bb";
@@ -30,6 +31,19 @@ describe("ITAD contracts", () => {
     const offers = await fakeClient([{ id, deals: [deal()] }]).prices([id], "US");
     expect(offers.get(id)?.[0]).toMatchObject({ store: "Fanatical", priceCents: 500,
       discountPercent: 50, voucher: "SAVE", drm: ["Steam"], url, validUntil: now + 86400 });
+  });
+
+  test("preserves the evidence needed to distinguish Steam purchases and keys from non-Steam offers", async () => {
+    const offers = (await fakeClient([{ id, deals: [
+      deal({ shop: { id: 61, name: "Steam" }, drm: [] }),
+      deal(),
+      deal({ shop: { id: 35, name: "GOG" }, drm: [{ id: 35, name: "GOG" }] }),
+      deal({ drm: [] }),
+    ] }]).prices([id], "US")).get(id)!;
+    expect(offers[0]?.id).toBe(`shop:61:${url}`);
+    expect(offers.map(activatesOnSteam)).toEqual([true, true, false, false]);
+    const bundles = await fakeClient([bundle()]).bundles("US");
+    expect(bundles.games.get(id)!.map(activatesOnSteam)).toEqual([false]);
   });
 
   test("keeps temporary 100% discounts but excludes regular/free/foreign/expired prices", async () => {
