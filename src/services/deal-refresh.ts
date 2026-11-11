@@ -13,11 +13,11 @@ interface RefreshOptions {
   limit?: number;
   onProgress?: (message: string) => void;
 }
-const LEASE_SECONDS = 15 * 60;
+const LEASE_SECONDS = 30 * 60;
 const MAPPING_MAX_AGE = 7 * 24 * 60 * 60;
 const BATCH_SIZE = 200;
 type WriteStatement = { sql: string; args: DbValue[] };
-interface WriteEntry { statement: WriteStatement; requireOne: boolean }
+interface WriteEntry { statement: WriteStatement; changes: number | null }
 type WriteGroup = WriteEntry[];
 export class OfferRefreshError extends Error {}
 
@@ -42,79 +42,71 @@ export async function refreshGameDeals(client: DbClient, source: DealSource, opt
     sql: "EXISTS (SELECT 1 FROM deal_refresh_state WHERE country=? AND lock_token=? AND lock_expires_at>?)",
     args: [DEAL_COUNTRY, token, now()] satisfies DbValue[],
   });
-  const renew = async () => {
-    const result = await client.execute({
-      sql: "UPDATE deal_refresh_state SET lock_expires_at=?, games_checked=? WHERE country=? AND lock_token=? AND lock_expires_at>?",
-      args: [now() + LEASE_SECONDS, checked, DEAL_COUNTRY, token, now()],
+  const renewal = (gamesChecked: number): WriteStatement => ({
+    sql: "UPDATE deal_refresh_state SET lock_expires_at=?, games_checked=? WHERE country=? AND lock_token=? AND lock_expires_at>?",
+    args: [now() + LEASE_SECONDS, gamesChecked, DEAL_COUNTRY, token, now()],
+  });
+  const guardedRows = (columns: number, rows: DbValue[][], statement: (values: string, guard: string) => string): WriteEntry[] => {
+    const size = Math.floor((DB_LIMITS.maxParams - guard().args.length) / columns);
+    return Array.from({ length: Math.ceil(rows.length / size) }, (_, index) => {
+      const chunk = rows.slice(index * size, (index + 1) * size);
+      const g = guard();
+      const values = `(VALUES ${chunk.map((row) => `(${row.map(() => "?").join(", ")})`).join(", ")})`;
+      return { statement: { sql: statement(values, g.sql), args: [...chunk.flat(), ...g.args] }, changes: chunk.length };
     });
-    if (result.rowsAffected !== 1) throw new OfferRefreshError("Offer refresh lease expired or was replaced");
   };
 
   try {
     const rows = await loadRankedGames(client, options.limit ?? -1);
     options.onProgress?.(`Loading active US bundles for ${rows.length} ranked games`);
     const bundles = await providerRequest(() => source.bundles(DEAL_COUNTRY));
-    await renew();
+    const renewed = await client.execute(renewal(checked));
+    if (renewed.rowsAffected !== 1) throw new OfferRefreshError("Offer refresh lease expired or was replaced");
 
     for (let offset = 0; offset < rows.length; offset += BATCH_SIZE) {
       const batch = rows.slice(offset, offset + BATCH_SIZE);
       const lookupIds = batch.filter((row) => row.checked_at === null || Number(row.checked_at) <= now() - MAPPING_MAX_AGE)
         .map((row) => Number(row.steam_app_id));
       const mappings = lookupIds.length ? await providerRequest(() => source.lookup(lookupIds)) : new Map<number, string | null>();
-      await renew();
-      const mappingWrites: WriteGroup[] = [];
+      const remapped: DbValue[][] = [];
+      const mapped: DbValue[][] = [];
       for (const row of batch) {
         const appId = Number(row.steam_app_id);
         if (lookupIds.includes(appId) && !mappings.has(appId)) throw new OfferRefreshError("Incomplete ITAD mapping batch");
         if (!mappings.has(appId)) mappings.set(appId, row.itad_id === null ? null : String(row.itad_id));
         else {
-          const g = guard();
           const id = mappings.get(appId)!;
-          const entries: WriteGroup = [];
-          if (id !== row.itad_id) {
-            entries.push({ statement: { sql: `DELETE FROM game_deal_cache WHERE steam_app_id=? AND ${g.sql}`, args: [appId, ...g.args] }, requireOne: false });
-          }
-          entries.push({
-            statement: {
-              sql: `INSERT INTO itad_game_map (steam_app_id, itad_id, checked_at)
-              SELECT ?, ?, ? WHERE ${g.sql}
-              ON CONFLICT(steam_app_id) DO UPDATE SET itad_id=excluded.itad_id, checked_at=excluded.checked_at`,
-              args: [appId, id, now(), ...g.args],
-            },
-            requireOne: true,
-          });
-          mappingWrites.push(entries);
+          if (id !== row.itad_id) remapped.push([appId]);
+          mapped.push([appId, id, now()]);
         }
       }
-      await writeGroups(client, mappingWrites, "Offer refresh lost mapping lease");
       const ids = [...new Set([...mappings.values()].filter((id): id is string => id !== null))];
       const priceFetchedAt = now();
       const prices = ids.length ? await providerRequest(() => source.prices(ids, DEAL_COUNTRY)) : new Map<string, DealOffer[]>();
-      await renew();
-      const writes: WriteGroup[] = [];
-      const save = (appId: number, kind: string, fetchedAt: number, offers: DealOffer[]): WriteStatement => {
-        const g = guard();
-        return {
-          sql: `INSERT INTO game_deal_cache (steam_app_id, country, kind, checked_at, offers_json)
-            SELECT ?, ?, ?, ?, ? WHERE ${g.sql}
-            ON CONFLICT(steam_app_id,country,kind) DO UPDATE SET checked_at=excluded.checked_at, offers_json=excluded.offers_json`,
-          args: [appId, DEAL_COUNTRY, kind, fetchedAt, JSON.stringify(offers), ...g.args],
-        };
-      };
+      const mappingWrites: WriteGroup = [
+        ...guardedRows(1, remapped, (values, guard) => `DELETE FROM game_deal_cache WHERE steam_app_id IN (SELECT column1 FROM ${values}) AND ${guard}`)
+          .map(({ statement }) => ({ statement, changes: null })),
+        ...guardedRows(3, mapped, (values, guard) => `INSERT INTO itad_game_map (steam_app_id, itad_id, checked_at)
+          SELECT column1, column2, column3 FROM ${values} WHERE ${guard}
+          ON CONFLICT(steam_app_id) DO UPDATE SET itad_id=excluded.itad_id, checked_at=excluded.checked_at`),
+      ];
+      const writes: WriteGroup[] = mappingWrites.length ? [mappingWrites] : [];
       for (const row of batch) {
         const appId = Number(row.steam_app_id);
         const id = mappings.get(appId)!;
         if (id === null) { unmapped++; continue; }
         const offers = prices.get(id);
-        const entries: WriteGroup = [];
+        const scopes: DbValue[][] = [];
         if (offers === undefined) missingPrices++;
-        else entries.push({ statement: save(appId, "retail", priceFetchedAt, offers), requireOne: true });
-        entries.push({ statement: save(appId, "bundle", bundles.fetchedAt, bundles.games.get(id) ?? []), requireOne: true });
-        writes.push(entries);
+        else scopes.push([appId, DEAL_COUNTRY, "retail", priceFetchedAt, JSON.stringify(offers)]);
+        scopes.push([appId, DEAL_COUNTRY, "bundle", bundles.fetchedAt, JSON.stringify(bundles.games.get(id) ?? [])]);
+        writes.push(guardedRows(5, scopes, (values, guard) => `INSERT INTO game_deal_cache (steam_app_id, country, kind, checked_at, offers_json)
+          SELECT column1, column2, column3, column4, column5 FROM ${values} WHERE ${guard}
+          ON CONFLICT(steam_app_id,country,kind) DO UPDATE SET checked_at=excluded.checked_at, offers_json=excluded.offers_json`));
       }
-      await writeGroups(client, writes, "Offer refresh lost publication lease");
+      writes.push([{ statement: renewal(checked + batch.length), changes: 1 }]);
+      await writeGroups(client, writes);
       checked += batch.length;
-      await renew();
       options.onProgress?.(`Checked ${checked}/${rows.length}; ${unmapped} unmapped, ${missingPrices} missing retail responses`);
     }
     const g = guard();
@@ -142,7 +134,7 @@ async function loadRankedGames(client: DbClient, limit: number): Promise<Record<
   let remaining = limit < 0 ? Infinity : limit;
   let cursor: { score: number; appId: number } | null = null;
   while (remaining > 0) {
-    const size = Math.min(1000, remaining);
+    const size = Math.min(DB_LIMITS.maxRowsPerResult, remaining);
     const page = await client.execute({
       sql: `SELECT g.steam_app_id, g.value_score, m.itad_id, m.checked_at FROM games g
         LEFT JOIN itad_game_map m ON m.steam_app_id=g.steam_app_id
@@ -167,14 +159,14 @@ async function providerRequest<T>(request: () => Promise<T>): Promise<T> {
   }
 }
 
-async function writeGroups(client: DbClient, groups: WriteGroup[], leaseError: string): Promise<void> {
+async function writeGroups(client: DbClient, groups: WriteGroup[]): Promise<void> {
   const baseBytes = byteLength(encodeDbRequest({ version: 1, op: "batch", mode: "write", statements: [] }));
   const batches: WriteGroup[] = [];
   let batch: WriteGroup = [];
   let bytes = baseBytes;
   for (const group of groups) {
     const entries = validateBatch(group.map(({ statement }) => statement)).map(({ sql, args }, index) => ({
-      statement: { sql, args }, requireOne: group[index]!.requireOne,
+      statement: { sql, args }, changes: group[index]!.changes,
     }));
     const groupBytes = byteLength(encodeDbRequest({ version: 1, op: "batch", mode: "write", statements: entries.map(({ statement }) => statement) })) - baseBytes;
     const separator = batch.length ? 1 : 0;
@@ -189,6 +181,6 @@ async function writeGroups(client: DbClient, groups: WriteGroup[], leaseError: s
   if (batch.length) batches.push(batch);
   for (const group of batches) {
     const results = await client.batch(group.map(({ statement }) => statement), "write");
-    if (results.some((result, index) => group[index]!.requireOne && result.rowsAffected !== 1)) throw new OfferRefreshError(leaseError);
+    if (results.some((result, index) => group[index]!.changes !== null && result.rowsAffected !== group[index]!.changes)) throw new OfferRefreshError("Offer refresh lost publication lease");
   }
 }
