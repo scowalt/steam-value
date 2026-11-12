@@ -147,7 +147,7 @@ describe("rankings with ITAD offers", () => {
     await started;
     expect(await getDealRefreshStatus(client, now)).toMatchObject({ isRunning: true });
     expect(await run()).toMatchObject({ skipped: true });
-    now += 901;
+    now += 1801;
     await run();
     release();
     await expect(first).rejects.toThrow("lease expired");

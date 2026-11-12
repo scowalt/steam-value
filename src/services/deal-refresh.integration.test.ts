@@ -9,6 +9,7 @@ import { getDealRefreshStatus, getGameDeals } from "./game-deals";
 import type { DealOffer } from "./deal-types";
 
 const start = 1_800_000_000;
+const lease = 1800;
 const gid = (id: number) => `00000000-0000-0000-0000-${String(id).padStart(12, "0")}`;
 const offer = (kind: "retail" | "bundle", validUntil = start + 86400): DealOffer => ({
   kind, id: `${kind}:1`, title: "Known offer", store: "Known store", url: "https://itad.link/example/?affiliate=unchanged",
@@ -77,7 +78,7 @@ test.each(["unknown", "committed"])("offer refresh stops after a %s publication 
   } });
   await expect(run(source(), uncertain)).rejects.toMatchObject({ code: outcome === "unknown" ? "OUTCOME_UNKNOWN" : "RESULT_LIMIT", outcome });
   expect(await getGameDeals(client, [2], now)).toEqual(new Map([[2, { status: "fresh", checkedAt: start, offers: [offer("retail")] }]]));
-  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastAttemptAt: start, lastSuccessAt: null, lastError: null, isRunning: true, gamesChecked: 0, freshGames: 4 });
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastAttemptAt: start, lastSuccessAt: null, lastError: null, isRunning: true, gamesChecked: 4, freshGames: 4 });
   expect(await run()).toMatchObject({ skipped: true });
 });
 
@@ -97,7 +98,7 @@ test.each(["unknown", "committed"])("a mapping publication error with %s outcome
   await expect(run(source({ lookup: async (ids) => new Map(ids.map((id) => [id, null])) }), uncertain)).rejects.toMatchObject({ code: outcome === "unknown" ? "OUTCOME_UNKNOWN" : "RESULT_LIMIT", outcome });
   expect((await getGameDeals(client, [2], now)).get(2)).toEqual({ status: "unmapped", checkedAt: start + 604800, offers: [] });
   expect((await client.execute("SELECT steam_app_id FROM game_deal_cache")).rows).toEqual([]);
-  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start, lastError: null, gamesChecked: 0, isRunning: true });
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start, lastError: null, gamesChecked: 4, isRunning: true });
 });
 
 test("an abandoned mapping writer cannot delete replacement offers and detects its rejected mapping publication", async () => {
@@ -113,14 +114,15 @@ test("an abandoned mapping writer cannot delete replacement offers and detects i
   const first = run(source(), delayed);
   try {
     await ready.promise;
+    now = start + lease - 1;
     expect(await run()).toMatchObject({ skipped: true });
-    now = start + 900;
+    now = start + lease;
     expect(await run()).toMatchObject({ skipped: false, gamesChecked: 4 });
     const replacement = await getGameDeals(client, [2], now);
     release.resolve();
-    await expect(first).rejects.toThrow("Offer refresh lost mapping lease");
+    await expect(first).rejects.toThrow("Offer refresh lost publication lease");
     expect(await getGameDeals(client, [2], now)).toEqual(replacement);
-    expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastAttemptAt: start + 900, lastSuccessAt: start + 900, lastError: null, isRunning: false, gamesChecked: 4 });
+    expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastAttemptAt: start + lease, lastSuccessAt: start + lease, lastError: null, isRunning: false, gamesChecked: 4 });
   } finally { release.resolve(); await first.catch(() => undefined); }
 });
 
@@ -193,6 +195,16 @@ test("checked mappings are reused until exactly seven days and remapping deletes
   expect(await getDealRefreshStatus(client, now)).toMatchObject({ gamesChecked: 4, freshGames: 0, lastSuccessAt: start + 604800 });
 });
 
+test("one provider batch whose lookup and price requests each take the ITAD client's worst-case retry time still publishes under its lease", async () => {
+  const worstCaseItadSeconds = 4 * 30.6 + 3 * 120;
+  const slow = <T>(value: T) => { now += Math.ceil(worstCaseItadSeconds); return value; };
+  expect(await run(source({
+    lookup: async (ids) => slow(new Map(ids.map((id) => [id, gid(id)]))),
+    prices: async (ids) => slow(new Map(ids.map((id) => [id, []]))),
+  }))).toEqual({ skipped: false, gamesChecked: 4, missingPrices: 0, unmapped: 0 });
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: now, lastError: null, isRunning: false, freshGames: 4 });
+});
+
 test("209 ranked games preserve 200-game provider batches and all 400-statement publication boundaries", async () => {
   await client.batch(Array.from({ length: 205 }, (_, i) => ({ sql: "INSERT INTO games (steam_app_id, name, value_score) VALUES (?, ?, 5)", args: [i + 5, `Game ${i + 5}`] })));
   expect(await run(source({ lookup: async (ids) => {
@@ -218,21 +230,21 @@ test.each(["publication", "completion"])("a replaced offer lease fences late %s 
   const first = run(source(), delayed);
   try {
     await ready.promise;
-    now = start + 900;
+    now = start + lease;
     await run(source({ prices: async (ids) => new Map(ids.map((id) => [id, []])), bundles: async () => ({ fetchedAt: now, games: new Map() }) }));
     release.resolve();
     await expect(first).rejects.toThrow(`Offer refresh lost ${phase} lease`);
-    expect((await getGameDeals(client, [2, 3], now)).get(2)).toEqual({ status: "fresh", checkedAt: start + 900, offers: [] });
-    expect((await getGameDeals(client, [3], now)).get(3)).toEqual({ status: "fresh", checkedAt: start + 900, offers: [] });
-    expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start + 900, lastError: null, isRunning: false, gamesChecked: 4 });
+    expect((await getGameDeals(client, [2, 3], now)).get(2)).toEqual({ status: "fresh", checkedAt: start + lease, offers: [] });
+    expect((await getGameDeals(client, [3], now)).get(3)).toEqual({ status: "fresh", checkedAt: start + lease, offers: [] });
+    expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start + lease, lastError: null, isRunning: false, gamesChecked: 4 });
   } finally { release.resolve(); await first.catch(() => undefined); }
 });
 
 test("an expired offer lease cannot renew, releases only its own failure state, and the next run can recover", async () => {
-  await expect(run(source({ bundles: async () => { now = start + 900; return { fetchedAt: now, games: new Map() }; } }))).rejects.toThrow("Offer refresh lease expired or was replaced");
+  await expect(run(source({ bundles: async () => { now = start + lease; return { fetchedAt: now, games: new Map() }; } }))).rejects.toThrow("Offer refresh lease expired or was replaced");
   expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: null, lastError: "Offer refresh lease expired or was replaced", isRunning: false, gamesChecked: 0, freshGames: 0 });
   expect(await run()).toMatchObject({ gamesChecked: 4, skipped: false });
-  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start + 900, lastError: null });
+  expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start + lease, lastError: null });
 });
 
 test("unsupported single-scope bytes reject the complete publication group rather than clip offers or publish a prefix", async () => {
@@ -289,3 +301,37 @@ test.each(["mapping", "scopes"])("native rollback preserves complete prior offer
   expect(await client.batch(["SELECT * FROM itad_game_map ORDER BY steam_app_id", "SELECT * FROM game_deal_cache ORDER BY steam_app_id, country, kind"], "read")).toEqual(before);
   expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: start, lastError: "Database constraint violation", isRunning: false, gamesChecked: 0 });
 });
+
+test("a 13,575-game hourly offer refresh publishes the same state in one database request per 200-game provider batch", async () => {
+  const total = 13_575;
+  for (let first = 5; first <= total; first += 400) {
+    await client.batch(Array.from({ length: Math.min(400, total + 1 - first) }, (_, i) => ({
+      sql: "INSERT INTO games (steam_app_id, name, value_score) VALUES (?, ?, 5)", args: [first + i, `Game ${first + i}`],
+    })));
+  }
+  const requests: string[] = [];
+  const counted = createHttpClient({ ...harness.clientConfig, fetch: async (request) => {
+    const body = validateWireRequest(await request.clone().json());
+    requests.push(body.op === "execute" ? "execute" : `batch:${body.mode}`);
+    return harness.fetch(request);
+  } });
+  const provider = source({
+    lookup: async (ids) => new Map(ids.map((id) => [id, id % 10 === 0 ? null : gid(id)])),
+    prices: async (ids) => new Map(ids.map((id) => [id, [offer("retail")]])),
+    bundles: async () => ({ fetchedAt: now, games: new Map(Array.from({ length: 50 }, (_, i) => [gid(i * 7 + 1), [offer("bundle")]])) }),
+  });
+  for (const [name, at] of [["first", start], ["hourly", start + 3600], ["weekly remap", start + 604800]] as const) {
+    now = at;
+    requests.length = 0;
+    expect(await run(provider, counted)).toEqual({ skipped: false, gamesChecked: total, missingPrices: 0, unmapped: 1357 });
+    expect(requests).toEqual(["execute", "execute", "execute", "execute", ...Array(68).fill("batch:write"), "execute"]);
+    expect((await client.batch([
+      "SELECT COUNT(*) AS total, COUNT(itad_id) AS mapped, MIN(checked_at) AS oldest, MAX(checked_at) AS newest FROM itad_game_map",
+      "SELECT kind, COUNT(*) AS total, MIN(checked_at) AS oldest, SUM(json_array_length(offers_json)) AS offers FROM game_deal_cache GROUP BY kind ORDER BY kind",
+    ], "read")).map(({ rows }) => rows)).toEqual([
+      [{ total, mapped: total - 1357, oldest: name === "weekly remap" ? at : start, newest: name === "weekly remap" ? at : start }],
+      [{ kind: "bundle", total: total - 1357, oldest: at, offers: 45 }, { kind: "retail", total: total - 1357, oldest: at, offers: total - 1357 }],
+    ]);
+    expect(await getDealRefreshStatus(client, now)).toMatchObject({ lastSuccessAt: at, lastError: null, isRunning: false, gamesChecked: total, totalGames: total, freshGames: total - 1357 });
+  }
+}, 120_000);
