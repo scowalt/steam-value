@@ -29,7 +29,7 @@
         <a class="z-button z-button-default" href="/city-builders">City builders</a>
       </nav>
     </header>
-    <form class="filters z-card z-card-body" aria-label="Filter games">
+    <form class="filters z-card z-card-body" aria-label="Filter games" autocomplete="off">
       <div class="checkbox-filters">
         <label><input class="z-checkbox" type="checkbox" id="on-sale"> On sale or in bundle</label>
         <label><input class="z-checkbox" type="checkbox" id="steam-only"> Activates on Steam only</label>
@@ -57,6 +57,22 @@
             <option value="partial">Partial+</option>
           </select>
         </div>
+      </div>
+      <div class="tag-filters">
+        <div class="tag-filter">
+          <label class="z-form-label" for="include-tag">Include tags</label>
+          <input class="z-input" type="text" id="include-tag" list="tag-options" autocomplete="off" aria-describedby="include-tag-help">
+          <p id="include-tag-help" class="tag-help">Shows games with any of these among their Top Tags. Press Enter to add.</p>
+          <ul id="include-tag-chips" class="tag-chips" aria-label="Included tags"></ul>
+        </div>
+        <div class="tag-filter">
+          <label class="z-form-label" for="exclude-tag">Exclude tags</label>
+          <input class="z-input" type="text" id="exclude-tag" list="tag-options" autocomplete="off" aria-describedby="exclude-tag-help">
+          <p id="exclude-tag-help" class="tag-help">Hides games with any of these among their Top Tags. Press Enter to add.</p>
+          <ul id="exclude-tag-chips" class="tag-chips" aria-label="Excluded tags"></ul>
+        </div>
+        <p id="tag-message" class="tag-message" role="status"></p>
+        <datalist id="tag-options"></datalist>
       </div>
     </form>
     <section id="rankings" class="results" aria-label="Rankings" tabindex="-1">

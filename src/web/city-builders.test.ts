@@ -31,6 +31,7 @@ describe("0build city-builder view", () => {
         if (url.pathname === "/api/city-builders") return handler(route);
         if (url.pathname === "/api/games") return route.fulfill({ json: [] });
         if (url.pathname === "/api/sync-state") return route.fulfill({ json: null });
+        if (url.pathname === "/api/tags") return route.fulfill({ json: [] });
         if (url.pathname === "/favicon.ico") return route.fulfill({ status: 204 });
       }
       unexpected.push(url.href);

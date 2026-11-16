@@ -26,7 +26,23 @@ interface Game {
   hasLocalPvP: boolean;
   hasCrossplatform: boolean;
   isMMO: boolean;
+  tags: string | null;
 }
+
+type TagMode = "include" | "exclude";
+
+interface TagList {
+  param: string;
+  input: HTMLInputElement;
+  chips: HTMLElement;
+  tags: string[];
+}
+
+const TOP_TAGS_SHOWN = 3;
+const MAX_TAGS_PER_LIST = 20;
+const MAX_TAG_LENGTH = 100;
+const ANY = "any";
+const TAG_MODES: TagMode[] = ["include", "exclude"];
 
 const tbody = document.getElementById("games-list")!;
 const gamesCards = document.getElementById("games-cards")!;
@@ -44,6 +60,34 @@ const hideIgnoredCheckbox = document.getElementById("hide-ignored") as HTMLInput
 const singleOnlyCheckbox = document.getElementById("single-only") as HTMLInputElement;
 const coopFilter = document.getElementById("coop-filter") as HTMLSelectElement;
 const controllerFilter = document.getElementById("controller-filter") as HTMLSelectElement;
+const tagOptions = document.getElementById("tag-options")!;
+const tagMessage = document.getElementById("tag-message")!;
+
+const checkboxFilters = [
+  ["onSale", onSaleCheckbox],
+  ["steamOnly", steamOnlyCheckbox],
+  ["hideEa", hideEaCheckbox],
+  ["hidePlayed", hidePlayedCheckbox],
+  ["hideMMO", hideMMOCheckbox],
+  ["hideIgnored", hideIgnoredCheckbox],
+  ["singleOnly", singleOnlyCheckbox],
+] as const;
+const selectFilters = [["coop", coopFilter], ["controller", controllerFilter]] as const;
+const tagLists: Record<TagMode, TagList> = {
+  include: {
+    param: "includeTag",
+    input: document.getElementById("include-tag") as HTMLInputElement,
+    chips: document.getElementById("include-tag-chips")!,
+    tags: [],
+  },
+  exclude: {
+    param: "excludeTag",
+    input: document.getElementById("exclude-tag") as HTMLInputElement,
+    chips: document.getElementById("exclude-tag-chips")!,
+    tags: [],
+  },
+};
+let knownTags = new Map<string, string>();
 
 let offset = 0;
 const limit = 100;
@@ -66,18 +110,112 @@ interface SyncState {
   gamesRemoved: number;
 }
 
-function getFilterParams(): URLSearchParams {
+function getFilterParams(forPageUrl = false): URLSearchParams {
   const params = new URLSearchParams();
-  if (onSaleCheckbox.checked) params.set("onSale", "true");
-  if (steamOnlyCheckbox.checked) params.set("steamOnly", "true");
-  if (hideEaCheckbox.checked) params.set("hideEa", "true");
-  if (hidePlayedCheckbox.checked) params.set("hidePlayed", "true");
-  if (hideMMOCheckbox.checked) params.set("hideMMO", "true");
-  if (hideIgnoredCheckbox.checked) params.set("hideIgnored", "true");
-  if (singleOnlyCheckbox.checked) params.set("singleOnly", "true");
-  if (coopFilter.value !== "any") params.set("coop", coopFilter.value);
-  if (controllerFilter.value !== "any") params.set("controller", controllerFilter.value);
+  for (const [param, checkbox] of checkboxFilters) {
+    if (forPageUrl ? checkbox.checked !== checkbox.defaultChecked : checkbox.checked) params.set(param, String(checkbox.checked));
+  }
+  for (const [param, select] of selectFilters) {
+    if (select.value !== ANY) params.set(param, select.value);
+  }
+  for (const { param, tags } of Object.values(tagLists)) {
+    for (const tag of tags) params.append(param, tag);
+  }
   return params;
+}
+
+function applyPageParams(params: URLSearchParams) {
+  for (const [param, checkbox] of checkboxFilters) {
+    const value = params.get(param);
+    if (value === "true" || value === "false") checkbox.checked = value === "true";
+  }
+  for (const [param, select] of selectFilters) {
+    const value = params.get(param);
+    if (value !== null && Array.from(select.options).some((option) => option.value === value)) select.value = value;
+  }
+  for (const tag of params.getAll(tagLists.include.param)) addTag("include", tag);
+  for (const tag of params.getAll(tagLists.exclude.param)) {
+    if (!tagLists.include.tags.some((included) => sameTag(included, tag))) addTag("exclude", tag);
+  }
+  renderTagChips();
+}
+
+function filtersChanged() {
+  const query = getFilterParams(true).toString();
+  history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+  resetAndLoad();
+}
+
+function sameTag(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
+function addTag(mode: TagMode, raw: string): boolean {
+  const trimmed = raw.trim().slice(0, MAX_TAG_LENGTH);
+  if (!trimmed) return false;
+  const name = knownTags.get(trimmed.toLowerCase()) ?? trimmed;
+  const list = tagLists[mode];
+  if (list.tags.some((tag) => sameTag(tag, name))) return true;
+  if (list.tags.length >= MAX_TAGS_PER_LIST) return false;
+  const opposite = tagLists[mode === "include" ? "exclude" : "include"];
+  opposite.tags = opposite.tags.filter((tag) => !sameTag(tag, name));
+  list.tags.push(name);
+  return true;
+}
+
+function renderTagChips() {
+  const removeIcon = '<svg class="status-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+  for (const { tags, chips } of Object.values(tagLists)) {
+    chips.replaceChildren(...tags.map((tag) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tag-chip z-button z-button-small z-button-default";
+      button.dataset.tag = tag;
+      button.setAttribute("aria-label", `Remove ${tag}`);
+      button.innerHTML = `${escapeHtml(tag)}${removeIcon}`;
+      item.append(button);
+      return item;
+    }));
+  }
+}
+
+function showTagMessage(message: string, input?: HTMLInputElement) {
+  tagMessage.textContent = message;
+  if (input) input.setAttribute("aria-invalid", String(message !== ""));
+}
+
+function commitTagInput(mode: TagMode) {
+  const { input } = tagLists[mode];
+  const typed = input.value.trim();
+  if (!typed) return;
+  if (knownTags.size > 0 && !knownTags.has(typed.toLowerCase())) {
+    showTagMessage(`No tag named "${typed}". Choose one of the suggestions.`, input);
+    return;
+  }
+  if (!addTag(mode, typed)) {
+    showTagMessage(`Use at most ${MAX_TAGS_PER_LIST} tags per list.`, input);
+    return;
+  }
+  input.value = "";
+  showTagMessage("", input);
+  renderTagChips();
+  filtersChanged();
+}
+
+function parseTopTags(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const tags: unknown = JSON.parse(raw);
+    return Array.isArray(tags) ? tags.filter((tag): tag is string => typeof tag === "string").slice(0, TOP_TAGS_SHOWN) : [];
+  } catch {
+    return [];
+  }
+}
+
+function topTagsHtml(game: Game): string {
+  const tags = parseTopTags(game.tags);
+  return tags.length > 0 ? `<div class="top-tags">${tags.map((tag) => escapeHtml(tag)).join(", ")}</div>` : "";
 }
 
 async function loadGames() {
@@ -216,6 +354,7 @@ function renderGames() {
         <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
           ${escapeHtml(game.name)}
         </a>
+        ${topTagsHtml(game)}
       </td>
       <td class="deals">${dealsHtml}</td>
       <td class="score">${game.valueScore?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "N/A"}</td>
@@ -247,12 +386,15 @@ function renderGames() {
     card.className = "game-card z-card";
     card.innerHTML = `
       <div class="game-card-header z-card-header">
-        <h2 class="game-card-title z-card-title">
-          <span class="game-card-rank">#${rank}</span>
-          <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
-            ${escapeHtml(game.name)}
-          </a>
-        </h2>
+        <div class="game-card-heading">
+          <h2 class="game-card-title z-card-title">
+            <span class="game-card-rank">#${rank}</span>
+            <a href="https://store.steampowered.com/app/${game.steamAppId}" target="_blank" rel="noopener noreferrer">
+              ${escapeHtml(game.name)}
+            </a>
+          </h2>
+          ${topTagsHtml(game)}
+        </div>
         <div class="game-card-score">
           <span>Score</span>
           <strong>${game.valueScore?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "N/A"}</strong>
@@ -315,6 +457,25 @@ function renderSyncState(state: SyncState | null) {
   syncStatus.textContent = parts.length > 0 ? parts.join(" · ") : "No refresh yet";
 }
 
+async function loadTagVocabulary() {
+  try {
+    const res = await fetch("/api/tags");
+    if (!res.ok) return;
+    const tags: unknown = await res.json();
+    if (!Array.isArray(tags)) return;
+    const valid = tags.filter((tag): tag is { name: string; count: number } =>
+      typeof tag?.name === "string" && tag.name !== "" && typeof tag.count === "number");
+    knownTags = new Map(valid.map((tag) => [tag.name.toLowerCase(), tag.name]));
+    tagOptions.replaceChildren(...valid.map((tag) => {
+      const option = document.createElement("option");
+      option.value = tag.name;
+      option.label = `${tag.count.toLocaleString()} games`;
+      return option;
+    }));
+  } catch {
+  }
+}
+
 function formatUnixTime(value: number): string {
   return new Date(value * 1000).toLocaleString(undefined, {
     month: "short",
@@ -325,15 +486,28 @@ function formatUnixTime(value: number): string {
 }
 
 loadMoreBtn.addEventListener("click", loadGames);
-onSaleCheckbox.addEventListener("change", resetAndLoad);
-steamOnlyCheckbox.addEventListener("change", resetAndLoad);
-hideEaCheckbox.addEventListener("change", resetAndLoad);
-hidePlayedCheckbox.addEventListener("change", resetAndLoad);
-hideMMOCheckbox.addEventListener("change", resetAndLoad);
-hideIgnoredCheckbox.addEventListener("change", resetAndLoad);
-singleOnlyCheckbox.addEventListener("change", resetAndLoad);
-coopFilter.addEventListener("change", resetAndLoad);
-controllerFilter.addEventListener("change", resetAndLoad);
+for (const [, control] of [...checkboxFilters, ...selectFilters]) control.addEventListener("change", filtersChanged);
+for (const mode of TAG_MODES) {
+  const { input, chips } = tagLists[mode];
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    commitTagInput(mode);
+  });
+  input.addEventListener("input", (event) => {
+    showTagMessage("", input);
+    const isListPick = !(event instanceof InputEvent) || event.inputType === "insertReplacementText";
+    if (isListPick) commitTagInput(mode);
+  });
+  chips.addEventListener("click", (event) => {
+    const tag = (event.target as Element).closest<HTMLElement>("button[data-tag]")?.dataset.tag;
+    if (tag === undefined) return;
+    tagLists[mode].tags = tagLists[mode].tags.filter((existing) => existing !== tag);
+    renderTagChips();
+    input.focus();
+    filtersChanged();
+  });
+}
 document.querySelector(".filters")!.addEventListener("submit", (event) => event.preventDefault());
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
@@ -341,5 +515,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 setInterval(checkDealExpiry, 30_000);
+applyPageParams(new URLSearchParams(location.search));
 void loadGames();
 void loadSyncState();
+void loadTagVocabulary();

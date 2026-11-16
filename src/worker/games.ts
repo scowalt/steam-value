@@ -61,7 +61,18 @@ export interface GameQueryParams {
   singleOnly: boolean;
   coop: string;
   controller: string;
+  includeTags: string[];
+  excludeTags: string[];
 }
+
+export interface TagCountDto {
+  name: string;
+  count: number;
+}
+
+const TOP_TAG_COUNT = 5;
+const MAX_TAG_FILTERS = 20;
+const MAX_TAG_LENGTH = 100;
 
 export function parseGameQuery(url: URL): GameQueryParams {
   return {
@@ -76,7 +87,22 @@ export function parseGameQuery(url: URL): GameQueryParams {
     singleOnly: url.searchParams.get("singleOnly") === "true",
     coop: url.searchParams.get("coop") ?? "any",
     controller: url.searchParams.get("controller") ?? "any",
+    includeTags: parseTagParams(url, "includeTag"),
+    excludeTags: parseTagParams(url, "excludeTag"),
   };
+}
+
+function parseTagParams(url: URL, name: string): string[] {
+  const seen = new Map<string, string>();
+  for (const raw of url.searchParams.getAll(name)) {
+    const tag = raw.trim().slice(0, MAX_TAG_LENGTH);
+    if (tag && !seen.has(tag.toLowerCase())) seen.set(tag.toLowerCase(), tag);
+  }
+  return [...seen.values()].slice(0, MAX_TAG_FILTERS);
+}
+
+function topTagCondition(tags: string[], mode: "EXISTS" | "NOT EXISTS"): string {
+  return `${mode} (SELECT 1 FROM json_each(games.tags) t WHERE t.key < ${TOP_TAG_COUNT} AND t.value COLLATE NOCASE IN (${tags.map(() => "?").join(", ")}))`;
 }
 
 export async function listGames(client: DbClient, params: GameQueryParams, now = unixNow()): Promise<GameDto[]> {
@@ -109,6 +135,15 @@ export async function listGames(client: DbClient, params: GameQueryParams, now =
     conditions.push("controller_support = 'full'");
   } else if (params.controller === "partial") {
     conditions.push("controller_support IN ('full', 'partial')");
+  }
+
+  if (params.includeTags.length > 0) {
+    conditions.push(topTagCondition(params.includeTags, "EXISTS"));
+    args.push(...params.includeTags);
+  }
+  if (params.excludeTags.length > 0) {
+    conditions.push(topTagCondition(params.excludeTags, "NOT EXISTS"));
+    args.push(...params.excludeTags);
   }
 
   args.push(params.limit, params.offset);
@@ -157,6 +192,21 @@ export async function listGames(client: DbClient, params: GameQueryParams, now =
 
   const deals = await getGameDeals(client, result.rows.map((row) => Number(row.steam_app_id)), now, params.steamOnly);
   return result.rows.map((row) => ({ ...mapGameRow(row), deals: deals.get(Number(row.steam_app_id))! }));
+}
+
+export async function listTopTags(client: DbClient): Promise<TagCountDto[]> {
+  const result = await client.execute({
+    sql: `
+      SELECT MIN(t.value) AS name, COUNT(*) AS count
+      FROM games, json_each(games.tags) t
+      WHERE value_score IS NOT NULL AND is_endless = 0
+        AND t.key < ${TOP_TAG_COUNT} AND typeof(t.value) = 'text'
+      GROUP BY t.value COLLATE NOCASE
+      ORDER BY count DESC, name
+    `,
+    args: [],
+  });
+  return result.rows.map((row) => ({ name: String(row.name), count: Number(row.count) }));
 }
 
 export async function listCityBuilderGames(client: DbClient): Promise<CityBuilderGameDto[]> {

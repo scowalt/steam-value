@@ -26,6 +26,7 @@ describe("Steam Value branding", () => {
             if (asset) return route.fulfill(asset);
             if (url.pathname === "/api/games" || url.pathname === "/api/city-builders") return route.fulfill({ json: [] });
             if (url.pathname === "/api/sync-state") return route.fulfill({ json: null });
+            if (url.pathname === "/api/tags") return route.fulfill({ json: [] });
           }
           unexpected.push(url.href);
           return route.abort();
