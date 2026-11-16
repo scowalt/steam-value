@@ -12,6 +12,10 @@ _Avoid_: Full system, Steam dump
 Public or third-party facts about a game, such as review score, review count, release date, controller support, game modes, tags, and HowLongToBeat estimates.
 _Avoid_: User data, Steam status
 
+**Top Tags**:
+A game's five most-voted SteamSpy user tags. The Rankings tag filters match only these, because a tag further down the list often reflects a few votes rather than what the game is.
+_Avoid_: Genres, all tags
+
 **Steam Status**:
 Scott-specific status for a catalog game: wishlist membership, ignored state, ownership, and playtime. A game can have zero or more Steam Status markers.
 _Avoid_: Catalog data, hydration

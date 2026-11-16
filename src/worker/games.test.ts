@@ -232,6 +232,84 @@ describe("native D1 viewer requests", () => {
     expect((await browse()).map((game) => game.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
+  describe("Top Tags filters", () => {
+    const tagged = (id: number, tags: string[] | string | null, isEndless = 0) => ({
+      sql: "INSERT INTO games (id, steam_app_id, name, value_score, tags, is_endless) VALUES (?, ?, ?, ?, ?, ?)",
+      args: [id, id, `Tagged ${id}`, 1000 - id, tags === null || typeof tags === "string" ? tags : JSON.stringify(tags), isEndless],
+    });
+    const ids = async (params: string) => (await browse(params)).map((game) => game.id);
+
+    beforeEach(async () => {
+      await seed([
+        tagged(1, ["Strategy", "Action", "RTS", "Historical", "Multiplayer", "Singleplayer"]),
+        tagged(2, ["Action", "FPS", "Shooter", "Multiplayer", "Co-op"]),
+        tagged(3, ["Indie", "Puzzle", "Casual", "2D", "Relaxing", "Strategy"]),
+        tagged(4, ["City Builder", "Simulation", "Strategy", "Management", "Building"]),
+        tagged(5, null),
+        tagged(6, ["Action", "Strategy", "Tower Defense", "Indie", "Cute"]),
+      ]);
+    });
+
+    test("include matches any of the five most-voted tags, ignoring case and the sixth place onward", async () => {
+      expect(await ids("includeTag=Strategy")).toEqual([1, 4, 6]);
+      expect(await ids("includeTag=strategy&includeTag=FPS")).toEqual([1, 2, 4, 6]);
+      expect(await ids("includeTag=Building")).toEqual([4]);
+      expect(await ids("includeTag=Singleplayer")).toEqual([]);
+      expect(await ids("includeTag=%20CITY%20builder%20")).toEqual([4]);
+      expect(await ids("includeTag=Nonexistent")).toEqual([]);
+    });
+
+    test("exclude drops games with any listed Top Tag and keeps untagged games", async () => {
+      expect(await ids("excludeTag=Action")).toEqual([3, 4, 5]);
+      expect(await ids("excludeTag=action&excludeTag=Puzzle")).toEqual([4, 5]);
+      expect(await ids("excludeTag=Strategy")).toEqual([2, 3, 5]);
+      expect(await ids("excludeTag=Nonexistent")).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+
+    test("include and exclude combine with each other, other filters, and pagination", async () => {
+      expect(await ids("includeTag=Strategy&excludeTag=Action")).toEqual([4]);
+      await client.execute("UPDATE games SET is_ignored=1 WHERE id=1");
+      expect(await ids("includeTag=Strategy&hideIgnored=true")).toEqual([4, 6]);
+      expect(await ids("includeTag=Strategy&limit=1&offset=1")).toEqual([4]);
+      expect(await ids("includeTag=Strategy&limit=1&offset=2")).toEqual([6]);
+      expect(await ids("includeTag=Strategy&limit=1&offset=3")).toEqual([]);
+      expect(await ids("excludeTag=Action&limit=2&offset=1")).toEqual([4, 5]);
+    });
+
+    test("blank, repeated and oversized tag parameters are normalised at the boundary", async () => {
+      expect(await ids("includeTag=&includeTag=%20&includeTag=Strategy&includeTag=STRATEGY")).toEqual([1, 4, 6]);
+      expect(await ids("includeTag=&excludeTag=")).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(await ids(`includeTag=${"x".repeat(5000)}`)).toEqual([]);
+      const fillers = (count: number) => Array.from({ length: count }, (_, i) => `excludeTag=Filler${i}`).join("&");
+      expect(await ids(`${fillers(19)}&excludeTag=Action`)).toEqual([3, 4, 5]);
+      expect(await ids(`${fillers(20)}&excludeTag=Action`)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(parseGameQuery(new URL(`https://x.test/?${fillers(60)}`)).excludeTags).toHaveLength(20);
+    });
+
+
+    test("/api/tags counts only the Top Tags of ranked games, merging case variants", async () => {
+      await seed([
+        tagged(20, ["Strategy", "strategy", "Rare", "A", "B", "Beyond"], 1),
+        { sql: "INSERT INTO games (id, steam_app_id, name, value_score, tags) VALUES (21, 21, 'Unranked', NULL, ?)", args: [JSON.stringify(["Strategy", "Unranked Only"])] },
+      ]);
+      const response = await harness.fetch("https://d1-test.invalid/api/tags");
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Cache-Control")).toBe("private, max-age=3600");
+      const tags = await response.json() as { name: string; count: number }[];
+      expect(tags.slice(0, 3)).toEqual([
+        { name: "Action", count: 3 },
+        { name: "Strategy", count: 3 },
+        { name: "Indie", count: 2 },
+      ]);
+      const names = tags.map((tag) => tag.name);
+      expect(names).not.toContain("Singleplayer");
+      expect(names).not.toContain("Unranked Only");
+      expect(names).not.toContain("Rare");
+      expect(tags.find((tag) => tag.name === "Multiplayer")).toEqual({ name: "Multiplayer", count: 2 });
+      expect(tags.find((tag) => tag.name === "Relaxing")).toEqual({ name: "Relaxing", count: 1 });
+    });
+  });
+
   test("keeps US offer selection, expiry, empty, unmapped and missing scopes distinct", async () => {
     const checkedAt = Math.floor(Date.now() / 1000);
     const cheap = { ...offer("retail", checkedAt + 3600), id: "retail:a", voucher: "SAVE α", drm: ["Steam"], note: "Existing note", expiresAt: checkedAt + 3600 };

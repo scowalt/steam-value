@@ -2,7 +2,7 @@ import { DB_ERROR_STATUS, DB_LIMITS, DbError, encodeDbSuccess, isJsonMediaType, 
 import { createD1Client } from "../db/d1";
 import { getSyncState } from "../services/steam-status-sync";
 import { getDealRefreshStatus } from "../services/game-deals";
-import { listCityBuilderGames, listGames, parseGameQuery } from "./games";
+import { listCityBuilderGames, listGames, listTopTags, parseGameQuery } from "./games";
 
 export interface Env {
   DB?: D1Database;
@@ -35,6 +35,10 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/games") {
     const games = await listGames(getClient(env), parseGameQuery(url));
     return json(games);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/tags") {
+    return json(await listTopTags(getClient(env)), { headers: { "Cache-Control": "private, max-age=3600" } });
   }
 
   if (request.method === "GET" && url.pathname === "/api/city-builders") {
