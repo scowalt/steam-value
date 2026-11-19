@@ -20,7 +20,6 @@ Both files come from [upstream commit `a7336dd1178c199b8e1f0f0f828e01a795a18b8d`
 | `@libsql/client`, `steam-session`, `drizzle-kit`, `miniflare`, `@types/bun` | MIT |
 | `drizzle-orm`, `playwright`, `typescript` | Apache-2.0 |
 | `@cloudflare/workers-types`, `wrangler` | MIT OR Apache-2.0 |
-| `howlongtobeat` | WTFPL v2 |
 
 Important transitive cases:
 
