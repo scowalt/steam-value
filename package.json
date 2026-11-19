@@ -51,5 +51,9 @@
     "howlongtobeat": "^1.8.0",
     "playwright": "^1.57.0",
     "steam-session": "^1.9.4"
+  },
+  "overrides": {
+    "ip-address": "^10.7.6",
+    "protobufjs": "^7.6.6"
   }
 }
