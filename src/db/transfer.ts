@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { createD1Client } from "./d1";
 import { DB_LIMITS, exactKeys, isRecord, type DbValue } from "./access";
 import { TransferError } from "./transfer-error";
-import { describeTables, packTransferRows, quote, readSchema, readSequence, recordRow, same, scalar, scanTables, tableSummary, TRANSFER_LIMITS } from "./transfer-native";
+import { describeTables, packTransferRows, quote, readSchema, readSequence, recordRow, same, scalar, scanTables, splitInternalSchema, tableSummary, TRANSFER_LIMITS } from "./transfer-native";
 export { TransferError } from "./transfer-error";
 export { TRANSFER_LIMITS } from "./transfer-native";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
@@ -141,8 +141,7 @@ export async function reviewedSchema() {
       await applyMigrations(binding, migrations);
       const source = createD1TransferSource(binding, { id: "reviewed-local-schema", freezeRecord: undefined! });
       const objects = await readSchema(source);
-      const excluded = objects.filter((object) => ["_cf_METADATA", "steam_value_migrations", "sqlite_autoindex_steam_value_migrations_1"].includes(object.name));
-      const application = objects.filter((object) => !excluded.includes(object) && object.name !== "sqlite_sequence");
+      const { excluded, application } = splitInternalSchema(objects);
       const sequenceObject = objects.find((object) => object.name === "sqlite_sequence")!;
       const legacyBinding = await runtime.getBinding("LEGACY_PROFILE");
       await legacyBinding.batch((await legacySchemaStatements()).map((sql) => legacyBinding.prepare(sql)));

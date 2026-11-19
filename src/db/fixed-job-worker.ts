@@ -1,7 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { byteLength, DbError, DB_LIMITS, exactKeys, isJsonMediaType, isRecord, isRequestId, nativeSqlFailure, readBoundedJson, validateStatement, type DbValue } from "./access";
 import { migrationChecksum, prepareMigrationGroup, schemaJsonQuery, validateMigrationHistory, type DbMigration } from "./migrations-native";
-import { createNativeTransferReader, describeTables, packTransferRows, quote, readSchema, readSequence, readTransferPage, recordRow, scalar, tableSummary, transferReadBounds, TRANSFER_LIMITS } from "./transfer-native";
+import { createNativeTransferReader, describeTables, packTransferRows, quote, readSchema, readSequence, readTransferPage, recordRow, scalar, splitInternalSchema, tableSummary, transferReadBounds, TRANSFER_LIMITS } from "./transfer-native";
 import { TransferError } from "./transfer-error";
 import { estimateFixedD1Verification, scanFixedD1Tables } from "./fixed-job-native";
 import type { ReviewedSchema, SnapshotRow, SourceInventory } from "./transfer";
@@ -70,8 +70,7 @@ export async function validateFixedD1Job(job: FixedD1Job, migrations: readonly D
 async function fixedSchema(binding: D1Database, job: FixedD1Job): Promise<ReviewedSchema> {
   const source = createNativeTransferReader(binding);
   const raw = await readSchema(source);
-  const excluded = raw.filter((object) => ["_cf_METADATA", "steam_value_migrations", "sqlite_autoindex_steam_value_migrations_1"].includes(object.name));
-  const objects = raw.filter((object) => !excluded.includes(object) && object.name !== "sqlite_sequence");
+  const { excluded, application: objects } = splitInternalSchema(raw);
   if (await digest(excluded) !== job.excludedMetadataDigest || await digest(objects) !== job.schemaObjectsDigest) throw new TransferError("SCHEMA_DRIFT");
   const sequenceObject = raw.find((object) => object.name === "sqlite_sequence");
   if (!sequenceObject) throw new TransferError("SCHEMA_DRIFT");

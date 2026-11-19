@@ -2,10 +2,9 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chmod, link, mkdir, mkdtemp, open, rename, rm, stat, symlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isDbValue, isRecord, type DbValue } from "./access";
-import { Miniflare } from "miniflare";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { collectReleasedD1Owners, createLocalD1, disposeD1Runtime, type LocalD1Owner } from "./local-d1";
+import { collectReleasedD1Owners, createD1Runtime, createLocalD1, disposeD1Runtime, type LocalD1Owner } from "./local-d1";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
 import { legacySchemaStatements } from "./schema-profile";
 import { createLocalFixedD1JobRunner, prepareFixedD1Job } from "./fixed-job-host";
@@ -212,13 +211,10 @@ async function jobRequests(job: object, withBinding = true) {
   const script = await build.outputs[0].text();
   collectReleasedD1Owners();
   const sharedDatabase = `fixed-job-${crypto.randomUUID()}`;
-  const runtime = new Miniflare({
-    workers: ["first", "second"].map((name) => ({
-      name, modules: true, script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"],
-      d1Databases: withBinding ? { DB: sharedDatabase } : {},
-    })),
-    d1Persist: false, cf: false, host: "127.0.0.1", port: 0,
-  });
+  const runtime = createD1Runtime(["first", "second"].map((name) => ({
+    name, script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"],
+    d1: withBinding ? { DB: sharedDatabase } : [],
+  })));
   return {
     async request(body: unknown, capability?: string, lifecycle = "first") {
       const worker = await runtime.getWorker(lifecycle);

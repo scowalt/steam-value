@@ -3,8 +3,8 @@ import { constants } from "node:fs";
 import { link, mkdtemp, open, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Miniflare } from "miniflare";
-import { createLocalD1, disposeD1Runtime } from "./local-d1";
+import type { Miniflare } from "miniflare";
+import { createD1Runtime, createLocalD1, disposeD1Runtime } from "./local-d1";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
 import { createD1TransferSource, createProtectedImportReceiptPublisher, exportSnapshot } from "./transfer";
 import { privateDirectory, writeJson } from "./transfer-artifacts";
@@ -36,7 +36,7 @@ async function fixture() {
     const artifact = await buildFixedD1JobWorker({ jobDirectory: packet.directory, reviewedJobDigest: packet.digest, destination: join(root, "artifact") });
     const script = await Bun.file(artifact.scriptPath).text();
     const databaseId = crypto.randomUUID();
-    runtime = new Miniflare({ modules: true, script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1Databases: { DB: databaseId }, d1Persist: false, cf: false, host: "127.0.0.1", port: 0 });
+    runtime = createD1Runtime({ script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1: { DB: databaseId } });
     const approvedDeployment = { accountId: "a".repeat(32), databaseId, workerName: "synthetic-fixed-32", endpoint: "https://synthetic-fixed-32.invalid/job", scriptDigest: artifact.scriptDigest, captureDigest: await migrationChecksum("synthetic-control-plane-capture-not-cloud-certification") };
     const record = {
       version: 1, kind: "fixed-d1-deployment", ...approvedDeployment, binding: { name: "DB", databaseId: approvedDeployment.databaseId },
@@ -394,7 +394,7 @@ test("a synthetic constraint fault through the actual dedicated artifact HTTP ro
     const directory = await privateDirectory(join(f.root, "constraint-manifest"), true);
     await writeJson(join(directory, "job.json"), job, true);
     const artifact = await buildFixedD1JobWorker({ jobDirectory: directory, reviewedJobDigest: await migrationChecksum(JSON.stringify(job)), destination: join(f.root, "constraint-artifact") });
-    runtime = new Miniflare({ modules: true, script: await Bun.file(artifact.scriptPath).text(), compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1Databases: ["DB"], d1Persist: false, cf: false, host: "127.0.0.1", port: 0 });
+    runtime = createD1Runtime({ script: await Bun.file(artifact.scriptPath).text(), compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1: ["DB"] });
     const worker = await runtime.getWorker();
     const send = async (op: string, extra = {}) => {
       const response = await worker.fetch(f.options.approvedDeployment.endpoint, { method: "POST", redirect: "error", headers: { Authorization: `Bearer ${f.options.capability}`, "Content-Type": "application/json" }, body: JSON.stringify(envelope(f, op, extra)) });
