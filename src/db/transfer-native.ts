@@ -8,6 +8,17 @@ export const TRANSFER_LIMITS = Object.freeze({ pageRows: 64, maxRowBytes: 2_000_
 
 export function quote(value: string): string { return `"${value.replaceAll('"', '""')}"`; }
 export function same(a: unknown, b: unknown): boolean { return JSON.stringify(a) === JSON.stringify(b); }
+
+const D1_INTERNAL_METADATA: SchemaObject = { type: "table", name: "_cf_METADATA", tbl_name: "_cf_METADATA", sql: "CREATE TABLE _cf_METADATA (\n        key INTEGER PRIMARY KEY,\n        value BLOB\n      )" };
+const MIGRATION_HISTORY = ["steam_value_migrations", "sqlite_autoindex_steam_value_migrations_1"];
+
+export function splitInternalSchema(raw: SchemaObject[]) {
+  const history = raw.filter((object) => MIGRATION_HISTORY.includes(object.name));
+  return {
+    excluded: [D1_INTERNAL_METADATA, ...history],
+    application: raw.filter((object) => !same(object, D1_INTERNAL_METADATA) && !history.includes(object) && object.name !== "sqlite_sequence"),
+  };
+}
 function safeRecord(row: Record<string, unknown>): Record<string, DbValue> {
   if (!Object.values(row).every(isDbValue)) throw new TransferError("SCHEMA_DRIFT");
   return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value as DbValue]));

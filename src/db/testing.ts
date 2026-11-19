@@ -1,7 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import { Miniflare } from "miniflare";
+import type { Miniflare } from "miniflare";
 import { applyMigrations, loadMigrations } from "./migrations";
-import { collectReleasedD1Owners, disposeD1Runtime } from "./local-d1";
+import { collectReleasedD1Owners, createD1Runtime, disposeD1Runtime } from "./local-d1";
 
 export interface D1TestEnv {
   DB: D1Database;
@@ -12,15 +12,7 @@ export type WorkerFetch = (request: Request, env: D1TestEnv) => Response | Promi
 
 export async function createD1TestHarness(workerFetch: WorkerFetch) {
   collectReleasedD1Owners();
-  const runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response(null, { status: 404 }); } }",
-    d1Databases: ["DB"],
-    d1Persist: false,
-    cf: false,
-    host: "127.0.0.1",
-    port: 0,
-  });
+  const runtime = createD1Runtime({ d1: ["DB"] });
   try {
     const DB = await runtime.getD1Database("DB");
     await applyMigrations(DB, await loadMigrations());
@@ -50,11 +42,7 @@ export async function createD1WorkerTestHarness(options: D1WorkerTestOptions = {
   collectReleasedD1Owners();
   const script = await (workerBundle ??= bundledWorker());
   const token = `synthetic-${crypto.randomUUID()}`;
-  const runtime = new Miniflare({
-    modules: true, script, compatibilityDate: "2026-05-22",
-    bindings: { STEAM_VALUE_DB_TOKEN: token }, d1Databases: ["DB"], d1Persist: false,
-    cf: false, host: "127.0.0.1", port: 0,
-  });
+  const runtime = createD1Runtime({ script, compatibilityDate: "2026-05-22", text: { STEAM_VALUE_DB_TOKEN: token }, d1: ["DB"] });
   try {
     if (options.bootstrap !== false) {
       await applyMigrations(await runtime.getD1Database("DB"), await loadMigrations());
@@ -65,7 +53,8 @@ export async function createD1WorkerTestHarness(options: D1WorkerTestOptions = {
       if (redirect !== "error" && redirect !== "manual" && redirect !== "follow") throw new Error("Unsupported fixture request redirect mode");
       const headers: Record<string, string> = {};
       request.headers.forEach((value, key) => { headers[key] = value; });
-      const response = await runtime.dispatchFetch(request.url, {
+      const { pathname, search } = new URL(request.url);
+      const response = await runtime.dispatchFetch(new URL(pathname + search, await runtime.ready), {
         method: request.method, headers,
         body: request.body === null ? undefined : await request.arrayBuffer(), signal: request.signal, redirect,
       });

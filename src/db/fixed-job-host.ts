@@ -1,9 +1,9 @@
 import { join } from "node:path";
-import { Miniflare } from "miniflare";
+import type { Miniflare } from "miniflare";
 import { byteLength, DB_LIMITS, exactKeys, isRecord, isRequestId, isJsonMediaType, readBoundedJson } from "./access";
 import { migrationChecksum } from "./migrations-native";
 import { loadMigrations } from "./migrations";
-import { collectReleasedD1Owners, disposeD1Runtime } from "./local-d1";
+import { collectReleasedD1Owners, createD1Runtime, disposeD1Runtime } from "./local-d1";
 import { artifactRows, createProtectedImportReceiptPublisher, reviewedSchema, verifyArtifact, type ImportReceipt, type ImportReceiptPublisher, type Snapshot } from "./transfer";
 import { createGuardedImportReceiptPublication, privateDirectory, privateFile, readJson, writeJson } from "./transfer-artifacts";
 import { TransferError } from "./transfer-error";
@@ -253,7 +253,7 @@ export async function createLocalFixedD1JobRunner(options: LocalFixedD1JobOption
       await privateDirectory(options.persistTo, true);
       assertActive();
       collectReleasedD1Owners();
-      runtime = new Miniflare({ modules: true, script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1Databases: ["DB"], d1Persist: join(options.persistTo, "v3", "d1"), cf: false, host: "127.0.0.1", port: 0 });
+      runtime = createD1Runtime({ script, compatibilityDate: "2026-05-22", compatibilityFlags: ["nodejs_compat"], d1: ["DB"] }, options.persistTo);
     },
     async request(body, assertActive) {
       if (!runtime) throw new TransferError("INCOMPLETE_IMPORT");

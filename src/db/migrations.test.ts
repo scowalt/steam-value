@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { Miniflare } from "miniflare";
+import type { Miniflare } from "miniflare";
+import { createD1Runtime } from "./local-d1";
 import { applyMigrations, loadMigrations, migrationChecksum } from "./migrations";
 
 type SchemaRow = Record<string, string | number | null>;
@@ -10,15 +11,7 @@ const databaseSlots = Array.from({ length: 100 }, (_, index) => `ISOLATED_${inde
 
 beforeAll(() => {
   nextDatabase = 0;
-  runtime = new Miniflare({
-    modules: true,
-    script: "export default { fetch() { return new Response(null, { status: 404 }); } }",
-    d1Databases: databaseSlots,
-    d1Persist: false,
-    cf: false,
-    host: "127.0.0.1",
-    port: 0,
-  });
+  runtime = createD1Runtime({ d1: databaseSlots });
 });
 
 afterAll(async () => {

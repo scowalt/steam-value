@@ -83,7 +83,7 @@ test("source inventory identifies every reviewed schema object and separates onl
     name: "updated_at", type: "INTEGER", notnull: 1, dflt_value: "unixepoch()",
   });
   expect(inventory.excludedMetadata.map((object) => object.name)).toEqual([
-    "_cf_METADATA", "sqlite_autoindex_steam_value_migrations_1", "steam_value_migrations",
+    "sqlite_autoindex_steam_value_migrations_1", "steam_value_migrations",
   ]);
   expect(inventory.schemaFingerprint).toMatch(/^[a-f0-9]{64}$/);
   expect(inventory.migrationFingerprint).toMatch(/^[a-f0-9]{64}$/);
@@ -287,11 +287,23 @@ test.each(["unknown", "altered"])("source adapter cannot hide %s internal metada
     const rows = await source.query(sql, args);
     if (rows.length && rows.every((row) => Object.hasOwn(row, "tbl_name"))) {
       if (kind === "unknown") return [...rows, { type: "table", name: "_cf_unreviewed", tbl_name: "_cf_unreviewed", sql: "CREATE TABLE _cf_unreviewed(value TEXT)" }];
-      return rows.map((row) => row.name === "_cf_METADATA" ? { ...row, sql: "CREATE TABLE _cf_METADATA(key INTEGER PRIMARY KEY, value BLOB, unreviewed TEXT)" } : row);
+      return [...rows, { type: "table", name: "_cf_METADATA", tbl_name: "_cf_METADATA", sql: "CREATE TABLE _cf_METADATA(key INTEGER PRIMARY KEY, value BLOB, unreviewed TEXT)" }];
     }
     return rows;
   } };
   await expect(inventorySource(altered)).rejects.toMatchObject({ code: "SCHEMA_DRIFT" });
+});
+
+test("a source created by an older local D1 runtime keeps its exact internal metadata table out of the application schema", async () => {
+  const { source } = await syntheticSource();
+  const older = { ...source, async query(sql: string, args?: readonly (string | number | null)[]) {
+    const rows = await source.query(sql, args);
+    if (!rows.length || !rows.every((row) => Object.hasOwn(row, "tbl_name"))) return rows;
+    return [{ type: "table", name: "_cf_METADATA", tbl_name: "_cf_METADATA", sql: "CREATE TABLE _cf_METADATA (\n        key INTEGER PRIMARY KEY,\n        value BLOB\n      )" }, ...rows];
+  } };
+  const [fresh, legacy] = [await inventorySource(source), await inventorySource(older)];
+  expect(legacy.excludedMetadata.map((object) => object.name)).toEqual(["_cf_METADATA", "sqlite_autoindex_steam_value_migrations_1", "steam_value_migrations"]);
+  expect(legacy.schemaFingerprint).toBe(fresh.schemaFingerprint);
 });
 
 test.each([
