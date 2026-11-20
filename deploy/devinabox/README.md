@@ -6,6 +6,7 @@ The owner permanently retired Arcane and selected this machine for the D1 migrat
 
 - Complete application releases: `~/.local/share/steam-value/releases/<commit>/`.
 - Selected release: `~/.local/share/steam-value/current`.
+- Release source: `~/.local/share/steam-value/source.git`, a bare clone of the public repository that the release updater fetches.
 - Protected job configuration: `~/.config/steam-value-d1/`, directories mode 0700 and files mode 0600.
 - Steam Status: Node 24.20.0, daily at 05:15 America/New_York, ten-minute timeout.
 - Offers: Bun, hourly, 45-minute timeout.
@@ -13,7 +14,7 @@ The owner permanently retired Arcane and selected this machine for the D1 migrat
 
 Operational cutover was accepted on 2026-10-31. The selected complete release matches the verified deployed source; both actual D1 jobs passed, their timers are enabled, and the first hourly scheduled offer run also succeeded. The saved Steam login was reused without more human input. The private Steel API remains running with completed sessions released. Keep the old `steam-value-hydrate.timer` and old web service disabled. Historical browser-recovery notes below describe earlier failures and approvals, not current instructions to disable healthy jobs or repeat cleanup.
 
-The owner selected Woodpecker instead of GitHub Actions and on 2026-10-31 assigned this repository's port here after the shared CI service became ready. Follow the [CI runbook](../../docs/ci/woodpecker.md). Preserve tested-current-main artifact promotion and narrow deployment credentials; do not rerun Actions or use an untested manual deployment.
+GitHub Actions deploys the Worker; see the [CI/CD runbook](../../docs/ci/github-actions.md). Woodpecker is retired. The jobs on this machine follow production through the release updater below, never through an untested manual deployment.
 
 ## Credentials
 
@@ -47,4 +48,20 @@ The 2026-10-26 viewer-origin correction passed the private stream handshake, but
 
 The import, actual consumer verification, release alignment and timer activation are complete; see the [cutover record](../../docs/operations/d1-cutover.md). Turso and the original export are no longer retained after the explicit owner waiver. Do not reset/re-import D1 or replay old migration/cleanup scripts.
 
-For future code installation, use the complete verified deployed commit with frozen dependencies. Pause future timer launches and drain active jobs before switching the selected release; preserve Steel, its profile and protected environment files, then restore the intended schedules. For recovery, preserve current D1 updates and obtain a new explicit data-aware decision. These templates do not authorize another schema operation, profile cleanup or destructive restore.
+## Release updates
+
+`steam-value-release-update.timer` runs `update-release.ts` from the selected release every 15 minutes. Each run:
+
+1. Reads the newest `production` deployment on GitHub whose latest status is `success`. That is the commit the Worker is serving.
+2. Does nothing if that commit is already selected.
+3. Fetches `main` into `source.git` and refuses a commit that is not on `main` or does not descend from the selected release. It never moves the jobs backwards.
+4. Refuses a release whose unit templates differ from the installed copies in `~/.config/systemd/user`, or whose `*.env.example` names a key missing from the matching file in `~/.config/steam-value-d1`. It reports key names only. Install the unit or add the key by hand, and the next run proceeds.
+5. Extracts the commit into `releases/<commit>/`, runs `bun install --frozen-lockfile` and writes `.release.json`.
+6. Stops the active job timers. If a job is still running, it restarts them and tries again on the next run. Otherwise it repoints `current` atomically, then restarts them.
+7. Keeps the selected release, the previous one and the newest updater-installed release, and deletes older updater-installed releases. Releases without `.release.json` are left alone.
+
+It never touches Steel, its profile, `~/.local/share/steam-value/steel` or the environment files. A refused or failed run leaves the unit failed; check `journalctl --user -u steam-value-release-update`.
+
+To install or change the updater, copy `steam-value-release-update.service` and `.timer` into `~/.config/systemd/user`, run `systemctl --user daemon-reload` and `systemctl --user enable --now steam-value-release-update.timer`.
+
+For recovery, preserve current D1 updates and obtain a new explicit data-aware decision. These templates do not authorize another schema operation, profile cleanup or destructive restore.

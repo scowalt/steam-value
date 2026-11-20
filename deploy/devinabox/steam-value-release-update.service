@@ -1,0 +1,13 @@
+[Unit]
+Description=Steam Value job release update to the production commit
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/steam-value/current
+ExecStart=%h/.bun/bin/bun --no-env-file deploy/devinabox/update-release.ts
+TimeoutStartSec=20min
+Nice=10
+UMask=0077
+NoNewPrivileges=true

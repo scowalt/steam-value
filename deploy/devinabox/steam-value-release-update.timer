@@ -1,0 +1,10 @@
+[Unit]
+Description=Check every 15 minutes for a newer Steam Value production release
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=2min
+Unit=steam-value-release-update.service
+
+[Install]
+WantedBy=timers.target
