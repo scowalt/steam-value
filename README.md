@@ -96,7 +96,7 @@ Remote schema application is a separately approved native operator workflow, not
 
 ### Data coverage
 
-`db:coverage` answers "what is missing, and what should be enriched next?" with one read-only aggregate query. It never writes and never contacts a provider.
+`db:coverage` answers "what is missing, and what should be enriched next?" with one read-only aggregate query. It never writes to the Game Catalog and never contacts a provider.
 
 ```sh
 bun run db:coverage --local --persist-to <isolated-directory>
@@ -108,9 +108,14 @@ bun run db:coverage --application --json
 
 - **Coverage**: total games, then how many have each Catalog Fact (review score, review count, tags, release date, controller support, game modes, HowLongToBeat ID, HowLongToBeat main time), a Value Score, and each Steam Status marker (owned, wishlist, ignored).
 - **Key blockers**: games missing reviews, games missing any of tags/release date/controller support/game modes, and non-endless games missing a HowLongToBeat Estimate or a Value Score. Endless games are excluded from the last two because they never receive a Value Score.
-- **Next buckets**: the pending enrichment groups, largest first, each with the script that works on it, for example `HowLongToBeat pending` or `Catalog Facts missing release date`. `Value Score pending recalculation` counts games that already have a review score and main time but no score.
+- **Next buckets**: the pending enrichment groups, largest first, each with the script that works on it or `manual review` when no script does, for example `HowLongToBeat pending` or `Catalog Facts missing release date`. `Value Score pending recalculation` counts games that already have a review score and main time but no score.
 
-The database stores no "checked" marker for two facts, so their counts are lower bounds: a game with no controller support looks the same as one never checked, and game modes count only when at least one mode flag is set.
+Some counts cannot reach zero, because the database stores no "checked" marker:
+
+- A game with no controller support looks the same as one never checked.
+- Game modes count only when at least one mode flag is set.
+- A game with zero Steam reviews has no review score, so it stays in `Reviews missing`.
+- `HowLongToBeat pending` treats an unset endless flag as non-endless, as the Value Score formula does. `hydrate-hltb.ts` skips those games.
 
 ## Viewer capabilities
 
