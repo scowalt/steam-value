@@ -4,5 +4,5 @@
     "lib": ["ESNext", "DOM"],
     "types": ["bun"]
   },
-  "include": ["ci/*.ts"]
+  "include": ["ci/*.ts", "deploy/devinabox/update-release*.ts"]
 }
