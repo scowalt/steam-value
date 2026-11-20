@@ -8,6 +8,7 @@
   "include": [
     "src/db/manual*.ts",
     "src/db/admin*.ts",
+    "src/db/coverage.ts",
     "src/lib/steam-reviews*.ts",
     "scripts/list.ts",
     "scripts/stats.ts",
@@ -42,6 +43,7 @@
     "scripts/setup-worker-db.ts",
     "scripts/db-generate*.ts",
     "scripts/db-inspect*.ts",
+    "scripts/db-coverage*.ts",
     "scripts/db-manual-tools.test.ts",
     "drizzle.config.ts"
   ]

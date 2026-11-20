@@ -77,6 +77,8 @@ The four historical package names remain, with explicit D1-safe replacements rat
 | `db:setup-worker` / `scripts/setup-worker-db.ts` | Same explicit bootstrap implementation/receipt as `db:push`, including all seven tables/indexes, not the old partial runtime ensures. |
 | `db:studio` (also `db:inspect`) | `scripts/db-inspect.ts`: read-only schema/index definitions, all-seven-table counts and optional bounded samples; explicit local or application scope. CLI JSON replaces direct-Turso browser Studio/SQL mutation. |
 
+`db:coverage` ([scripts/db-coverage.ts](../../scripts/db-coverage.ts)) is a later read-only addition, not one of the 30 historical entrypoints. It takes the same explicit `--local --persist-to` or `--application` scope as `db:inspect` and sends one aggregate `SELECT` over `games`, so its counts come from a single statement rather than a multi-page read. See the [README](../../README.md#data-coverage) for the report's definitions.
+
 ### Generation
 
 `migrations/` is authoritative for all seven tables. Prepare reviewed SQLite SQL in a local file, then:

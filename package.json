@@ -26,6 +26,7 @@
     "db:push": "bun scripts/db-migrate.ts",
     "db:studio": "bun scripts/db-inspect.ts",
     "db:inspect": "bun scripts/db-inspect.ts",
+    "db:coverage": "bun scripts/db-coverage.ts",
     "db:setup-worker": "bun scripts/setup-worker-db.ts",
     "catalog:refresh": "doppler run --project steam-value --config dev -- bun scripts/refresh-steam-catalog.ts",
     "deals:refresh": "doppler run --project steam-value --config dev -- bun scripts/refresh-deals.ts",
