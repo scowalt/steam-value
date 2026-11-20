@@ -88,10 +88,29 @@ The complete authoritative history is `migrations/`, **not** the two-table Drizz
 | `db:migrate:local`, `db:push`, `db:setup-worker` | Explicit complete bootstrap, requires `--local --persist-to`; no remote default |
 | `db:generate --name <name> --sql-file <reviewed-file>` | Validate a reviewed candidate on disposable native D1 and append immutable SQL; never apply production |
 | `db:studio`, `db:inspect` | Read-only CLI schema/counts/bounded samples, explicit local or authorized application scope; replaces direct-Turso Studio |
+| `db:coverage` | Read-only data coverage report for the Game Catalog, explicit local or authorized application scope; see [Data coverage](#data-coverage) |
 | `db:transfer --help` | Explicit inventory/export/import/validate/prepare-rollback; local CLI or separately approved supplied operator handles |
 | `db:rehearse --local --destination <new-private-directory>` | Synthetic complete request/client/transfer/recovery rehearsal only |
 
 Remote schema application is a separately approved native operator workflow, not arbitrary SQL on the machine endpoint. Interrupted imports remain incomplete and unpromotable; preserve them and restore into a **fresh explicitly bootstrapped target**, never append/replay/reset by default.
+
+### Data coverage
+
+`db:coverage` answers "what is missing, and what should be enriched next?" with one read-only aggregate query. It never writes and never contacts a provider.
+
+```sh
+bun run db:coverage --local --persist-to <isolated-directory>
+bun run db:coverage --application
+bun run db:coverage --application --json
+```
+
+`--application` reads the deployed database through the machine endpoint, so it needs the same four application/Access keys and the same approval as `db:inspect --application`. The report has three parts:
+
+- **Coverage**: total games, then how many have each Catalog Fact (review score, review count, tags, release date, controller support, game modes, HowLongToBeat ID, HowLongToBeat main time), a Value Score, and each Steam Status marker (owned, wishlist, ignored).
+- **Key blockers**: games missing reviews, games missing any of tags/release date/controller support/game modes, and non-endless games missing a HowLongToBeat Estimate or a Value Score. Endless games are excluded from the last two because they never receive a Value Score.
+- **Next buckets**: the pending enrichment groups, largest first, each with the script that works on it, for example `HowLongToBeat pending` or `Catalog Facts missing release date`. `Value Score pending recalculation` counts games that already have a review score and main time but no score.
+
+The database stores no "checked" marker for two facts, so their counts are lower bounds: a game with no controller support looks the same as one never checked, and game modes count only when at least one mode flag is set.
 
 ## Viewer capabilities
 
